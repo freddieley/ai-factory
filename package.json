@@ -1,6 +1,6 @@
 {
   "name": "ai-factory",
-  "version": "1.0.0",
+  "version": "1.5.0",
   "private": true,
   "description": "Local-first AI engineering factory control plane for civilian robotics and CAD workflows.",
   "type": "module",
