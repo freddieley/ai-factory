@@ -1,7 +1,7 @@
 import { z } from "zod";
+import { randomUUID } from "node:crypto";
 import { runAgent } from "./agent.js";
-import { addEvent, createRun } from "./db.js";
-import { providerInfo } from "./providers.js";
+import { addEvent } from "./db.js";
 
 export const FactoryRequest = z.object({
   projectId: z.string().min(1),
@@ -14,7 +14,7 @@ export type FactoryRequest = z.infer<typeof FactoryRequest>;
 
 export async function runFactory(request: FactoryRequest) {
   const normalized = FactoryRequest.parse(request);
-  const cycleId = createRun(normalized.projectId, `factory:${normalized.objective}`, providerInfo().provider, providerInfo().model);
+  const cycleId = randomUUID();
   const results: unknown[] = [];
 
   addEvent(cycleId, "factory.cycle.started", {
@@ -37,12 +37,12 @@ export async function runFactory(request: FactoryRequest) {
       output: result.output
     });
 
-    if (!/not verified|unable to|failed|error|unmet|cannot/i.test(result.output)) {
-      addEvent(cycleId, "factory.cycle.completed", { iteration, reason: "Agent produced no explicit unresolved condition." });
+    if (result.output && !/not verified|unable to|failed|error|unmet|cannot/i.test(result.output)) {
+      addEvent(cycleId, "factory.cycle.completed", { iteration, reason: "No explicit unresolved condition was reported." });
       return { cycleId, status: "completed", iterations: results };
     }
   }
 
-  addEvent(cycleId, "factory.cycle.completed", { reason: "Iteration budget exhausted; review evidence." });
+  addEvent(cycleId, "factory.cycle.completed", { reason: "Iteration budget exhausted; human review required." });
   return { cycleId, status: "needs_review", iterations: results };
 }
