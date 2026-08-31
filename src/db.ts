@@ -17,7 +17,6 @@ CREATE TABLE IF NOT EXISTS projects (
   status TEXT NOT NULL DEFAULT 'active',
   created_at TEXT NOT NULL
 );
-
 CREATE TABLE IF NOT EXISTS runs (
   id TEXT PRIMARY KEY,
   project_id TEXT NOT NULL,
@@ -29,7 +28,6 @@ CREATE TABLE IF NOT EXISTS runs (
   created_at TEXT NOT NULL,
   completed_at TEXT
 );
-
 CREATE TABLE IF NOT EXISTS events (
   id TEXT PRIMARY KEY,
   run_id TEXT NOT NULL,
@@ -37,7 +35,6 @@ CREATE TABLE IF NOT EXISTS events (
   payload TEXT NOT NULL,
   created_at TEXT NOT NULL
 );
-
 CREATE TABLE IF NOT EXISTS approvals (
   id TEXT PRIMARY KEY,
   project_id TEXT NOT NULL,
@@ -51,51 +48,32 @@ CREATE TABLE IF NOT EXISTS approvals (
 
 export function createProject(name: string, description: string) {
   const id = randomUUID();
-  db.prepare(
-    `INSERT INTO projects (id,name,description,created_at) VALUES (?,?,?,?)`
-  ).run(id, name, description, new Date().toISOString());
+  db.prepare(`INSERT INTO projects (id,name,description,created_at) VALUES (?,?,?,?)`).run(id, name, description, new Date().toISOString());
   return getProject(id);
 }
-
-export function getProject(id: string) {
-  return db.prepare(`SELECT * FROM projects WHERE id = ?`).get(id);
-}
-
-export function listProjects() {
-  return db.prepare(`SELECT * FROM projects ORDER BY created_at DESC`).all();
-}
-
+export function getProject(id: string) { return db.prepare(`SELECT * FROM projects WHERE id = ?`).get(id); }
+export function listProjects() { return db.prepare(`SELECT * FROM projects ORDER BY created_at DESC`).all(); }
 export function createRun(projectId: string, prompt: string, provider: string, model: string) {
   const id = randomUUID();
-  db.prepare(
-    `INSERT INTO runs (id,project_id,prompt,provider,model,status,created_at) VALUES (?,?,?,?,?,?,?)`
-  ).run(id, projectId, prompt, provider, model, "running", new Date().toISOString());
+  db.prepare(`INSERT INTO runs (id,project_id,prompt,provider,model,status,created_at) VALUES (?,?,?,?,?,?,?)`).run(id, projectId, prompt, provider, model, "running", new Date().toISOString());
   return id;
 }
-
 export function finishRun(id: string, status: string, output: string) {
-  db.prepare(
-    `UPDATE runs SET status=?, output=?, completed_at=? WHERE id=?`
-  ).run(status, output, new Date().toISOString(), id);
+  db.prepare(`UPDATE runs SET status=?, output=?, completed_at=? WHERE id=?`).run(status, output, new Date().toISOString(), id);
 }
-
 export function addEvent(runId: string, type: string, payload: unknown) {
-  db.prepare(
-    `INSERT INTO events (id,run_id,type,payload,created_at) VALUES (?,?,?,?,?)`
-  ).run(randomUUID(), runId, type, JSON.stringify(payload), new Date().toISOString());
+  db.prepare(`INSERT INTO events (id,run_id,type,payload,created_at) VALUES (?,?,?,?,?)`).run(randomUUID(), runId, type, JSON.stringify(payload), new Date().toISOString());
 }
-
+export function listEvents(runId: string) {
+  return db.prepare(`SELECT id,run_id,type,payload,created_at FROM events WHERE run_id=? ORDER BY created_at ASC`).all(runId);
+}
+export function getRun(id: string) { return db.prepare(`SELECT * FROM runs WHERE id=?`).get(id); }
 export function requestApproval(projectId: string, action: string, payload: unknown) {
   const id = randomUUID();
-  db.prepare(
-    `INSERT INTO approvals (id,project_id,action,payload,created_at) VALUES (?,?,?,?,?)`
-  ).run(id, projectId, action, JSON.stringify(payload), new Date().toISOString());
+  db.prepare(`INSERT INTO approvals (id,project_id,action,payload,created_at) VALUES (?,?,?,?,?)`).run(id, projectId, action, JSON.stringify(payload), new Date().toISOString());
   return id;
 }
-
 export function listApprovals(projectId?: string) {
-  if (projectId) {
-    return db.prepare(`SELECT * FROM approvals WHERE project_id=? ORDER BY created_at DESC`).all(projectId);
-  }
+  if (projectId) return db.prepare(`SELECT * FROM approvals WHERE project_id=? ORDER BY created_at DESC`).all(projectId);
   return db.prepare(`SELECT * FROM approvals ORDER BY created_at DESC`).all();
 }
