@@ -42,7 +42,7 @@ describe("advanced mechanical constraints", () => {
   });
 
   it("computes worst-case fit clearance and deterministic fit ordering", () => {
-    const fit = analyzeFit({ id: "shaft", type: "clearance", holeNominalMm: 10, shaftNominalMm: 9.8, holeMinusMm: 0.05, shaftPlusMm: 0.05 });
+    const fit = analyzeFit({ id: "shaft", type: "clearance", holeNominalMm: 10, shaftNominalMm: 9.8, holeMinusMm: 0.05, holePlusMm: 0.05, shaftMinusMm: 0.05, shaftPlusMm: 0.05 });
     expect(fit.nominalClearanceMm).toBeCloseTo(0.2, 8);
     expect(fit.minClearanceMm).toBeCloseTo(0.1, 8);
     expect(fit.maxClearanceMm).toBeCloseTo(0.3, 8);
