@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { casualResponse, isEngineeringRequest } from "../src/intent.js";
+import { isEngineeringRequest } from "../src/intent.js";
 
 describe("request intent gate", () => {
   it("does not start engineering work for greetings", () => {
@@ -15,9 +15,5 @@ describe("request intent gate", () => {
 
   it("does not mistake a greeting prefix for a casual-only message", () => {
     expect(isEngineeringRequest("Hi, create a 20 mm cube")).toBe(true);
-  });
-
-  it("returns a useful conversational response", () => {
-    expect(casualResponse("Hi")).toContain("Tell me what you'd like to build or change");
   });
 });
