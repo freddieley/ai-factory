@@ -128,11 +128,11 @@ export function selectElectronicsComponents(architectureInput: unknown, componen
   });
 
   const ranked = candidates.sort((a, b) => b.score - a.score || a.partNumber.localeCompare(b.partNumber) || a.componentId.localeCompare(b.componentId));
-  const selected = ranked.filter(candidate => candidate.lifecycle === "active" && !candidate.ruleFindings.some(finding => finding.severity === "error") && candidate.matchedBlockTypes.length > 0).slice(0, limit);
+  const selected = ranked.filter(candidate => candidate.lifecycle === "active" && !candidate.ruleFindings.some(finding => finding.severity !== "info") && candidate.matchedBlockTypes.length > 0).slice(0, limit);
   const blockingFindings = ranked
-    .filter(candidate => candidate.lifecycle === "active" && candidate.ruleFindings.some(finding => finding.severity === "error"))
+    .filter(candidate => candidate.lifecycle === "active" && candidate.ruleFindings.some(finding => finding.severity === "error" || finding.severity === "warning"))
     .slice(0, 10)
-    .map(candidate => `${candidate.partNumber}: ${candidate.ruleFindings.filter(finding => finding.severity === "error").map(finding => finding.message).join(" ")}`);
+    .map(candidate => `${candidate.partNumber}: ${candidate.ruleFindings.filter(finding => finding.severity !== "info").map(finding => finding.message).join(" ")}`);
 
   return ElectronicsComponentSelection.parse({
     schema: "ai-factory.electronics-component-selection/v1",
