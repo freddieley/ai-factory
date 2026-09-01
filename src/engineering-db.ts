@@ -2,16 +2,6 @@ import { db } from "./db.js";
 import { randomUUID } from "node:crypto";
 import type { Requirement, EngineeringPlan } from "./engineering.js";
 
-db.exec(`
-CREATE TABLE IF NOT EXISTS engineering_requirements (id TEXT PRIMARY KEY, project_id TEXT NOT NULL, description TEXT NOT NULL, category TEXT NOT NULL, value TEXT, unit TEXT, priority TEXT NOT NULL, verification_method TEXT, verification_status TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
-CREATE TABLE IF NOT EXISTS engineering_plans (id TEXT PRIMARY KEY, project_id TEXT NOT NULL, objective TEXT NOT NULL, plan_json TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'draft', created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
-CREATE TABLE IF NOT EXISTS fusion_links (project_id TEXT PRIMARY KEY, hub_id TEXT, fusion_project_id TEXT, design_id TEXT, updated_at TEXT NOT NULL);
-CREATE TABLE IF NOT EXISTS verification_records (id TEXT PRIMARY KEY, project_id TEXT NOT NULL, run_id TEXT, requirement_id TEXT, status TEXT NOT NULL, evidence TEXT NOT NULL, created_at TEXT NOT NULL);
-CREATE INDEX IF NOT EXISTS idx_engineering_requirements_project ON engineering_requirements(project_id, created_at);
-CREATE INDEX IF NOT EXISTS idx_engineering_plans_project ON engineering_plans(project_id, updated_at);
-CREATE INDEX IF NOT EXISTS idx_verification_project ON verification_records(project_id, created_at);
-`);
-
 export function saveRequirements(projectId:string, requirements:Requirement[]) {
   const now=new Date().toISOString();
   const insert=db.prepare(`INSERT INTO engineering_requirements (id,project_id,description,category,value,unit,priority,verification_method,verification_status,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET description=excluded.description,category=excluded.category,value=excluded.value,unit=excluded.unit,priority=excluded.priority,verification_method=excluded.verification_method,verification_status=excluded.verification_status,updated_at=excluded.updated_at`);
