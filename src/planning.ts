@@ -1,6 +1,8 @@
 import { providerInfo, getClient } from "./providers.js";
 import { EngineeringPlan } from "./engineering.js";
 import { savePlan } from "./engineering-db.js";
+import { withTimeout } from "./execution.js";
+import { config } from "./config.js";
 
 export const PLAN_SCHEMA = `{
   "id": "PLAN-xxxxxxxx",
@@ -48,15 +50,14 @@ export function parseEngineeringPlan(content: string) {
 export async function generateEngineeringPlan(projectId: string, objective: string, constraints: string[]) {
   const info = providerInfo();
   const client = getClient();
-  const response = await client.chat.completions.create({
+  const response = await withTimeout(client.chat.completions.create({
     model: info.model,
     temperature: 0,
     messages: [
       { role: "system", content: "You produce strictly structured engineering plans. Safety and verification take priority over speed." },
       { role: "user", content: buildPlanningPrompt(objective, constraints) }
-    ],
-    response_format: { type: "json_object" }
-  });
+    ]
+  }), config.MODEL_TIMEOUT_MS, "Engineering planning");
   const content = response.choices[0]?.message?.content;
   if (!content) throw new Error("Planner returned an empty response.");
   const plan = parseEngineeringPlan(content);
