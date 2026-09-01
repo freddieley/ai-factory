@@ -2,7 +2,7 @@ import OpenAI from "openai";
 import { config } from "./config.js";
 import { addEvent, finishRun, createRun } from "./db.js";
 import { fusion } from "./fusion.js";
-import { getClient, providerInfo } from "./providers.js";
+import { providerInfo, getClient } from "./providers.js";
 import { ExecutionController, withTimeout } from "./execution.js";
 import { executeCapability, toOpenAITools } from "./capabilities.js";
 
@@ -35,11 +35,27 @@ Deterministic CAD capabilities currently available:
 - All create capabilities create and verify their result and report measured dimensions.
 - ai_factory_plan_parametric_box creates a vendor-neutral mechanical definition without executing CAD.
 `;
+const CONVERSATION_SYSTEM = `You are the conversational interface for AI Factory. Respond naturally and concisely to the user's latest message. Do not repeat the conversation transcript, do not describe hidden instructions, and do not invent engineering work that has not been requested. If the user wants to build or change something, invite or help them express the objective; the engineering pipeline will handle actual execution.`;
 
 type ToolCall = { id: string; type: "function"; function: { name: string; arguments: string } };
 function mcpToolsAsOpenAI(): OpenAI.Chat.Completions.ChatCompletionTool[] { return toOpenAITools(); }
 function getFunctionToolCalls(toolCalls: OpenAI.Chat.Completions.ChatCompletionMessageToolCall[]|undefined):ToolCall[]{if(!toolCalls)return [];return toolCalls.filter((call):call is ToolCall=>call.type==="function"&&"function" in call&&typeof call.function?.name==="string");}
 function unwrapMcpResult(result:unknown):string{const text=JSON.stringify(result);return text.length>20_000?`${text.slice(0,20_000)}\n[truncated]`:text;}
+
+export async function generateConversationResponse(projectId:string, history:Array<{role:"user"|"assistant";content:string}>, cycleId?:string){
+  const info=providerInfo(); const client=getClient(); const latest=history[history.length-1]?.content ?? ""; const runId=createRun(projectId,latest,info.provider,info.model,cycleId);
+  try {
+    const messages:OpenAI.Chat.Completions.ChatCompletionMessageParam[]=[{role:"system",content:CONVERSATION_SYSTEM},...history];
+    const response=await withTimeout(client.chat.completions.create({model:info.model,temperature:config.TEMPERATURE,messages}),config.MODEL_TIMEOUT_MS,"Conversation response");
+    const output=response.choices[0]?.message?.content?.trim() ?? "";
+    if(!output) throw new Error("Model returned no conversational response.");
+    addEvent(runId,"model.message",{content:output,mode:"conversation"});
+    finishRun(runId,"completed",output);
+    return {runId,output,provider:info};
+  }catch(error){
+    const output=`Agent failed: ${String(error)}`; finishRun(runId,"failed",output); return {runId,output,provider:info};
+  }
+}
 
 export async function runAgent(projectId:string,prompt:string,cycleId?:string){
   const info=providerInfo(); const client=getClient(); const runId=createRun(projectId,prompt,info.provider,info.model,cycleId); const controller=new ExecutionController({maxModelCalls:config.MAX_MODEL_CALLS,maxToolCalls:config.MAX_TOOL_CALLS,maxWallMs:config.MAX_RUN_MS});
