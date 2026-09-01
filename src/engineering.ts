@@ -1,13 +1,11 @@
 import { z } from "zod";
 import { randomUUID } from "node:crypto";
-
 export const RequirementCategory=z.enum(["functional","performance","mechanical","electrical","manufacturing","safety","environmental","cost","other"]);
 export const Requirement=z.object({id:z.string().default(()=>`REQ-${randomUUID().slice(0,8)}`),description:z.string().min(1),category:RequirementCategory.default("other"),value:z.union([z.string(),z.number()]).optional(),unit:z.string().optional(),priority:z.enum(["must","should","could"]).default("should"),verificationMethod:z.string().optional(),verificationStatus:z.enum(["unverified","pass","fail"]).default("unverified")});
 export type Requirement=z.infer<typeof Requirement>;
-export const EngineeringFactKind=z.enum(["decision","assumption","constraint","acceptance_criterion"]);
-export type EngineeringFactKind=z.infer<typeof EngineeringFactKind>;
-export const EngineeringFact=z.object({id:z.string().optional(),kind:EngineeringFactKind,key:z.string().min(1),statement:z.string().min(1),value:z.unknown().default(null),supersedesId:z.string().optional()});
-export type EngineeringFact=z.infer<typeof EngineeringFact>;
-export const EngineeringPlan=z.object({id:z.string().default(()=>`PLAN-${randomUUID().slice(0,8)}`),objective:z.string().min(1),assumptions:z.array(z.string()).default([]),requirements:z.array(Requirement).default([]),steps:z.array(z.object({id:z.string(),title:z.string(),description:z.string(),operationClass:z.enum(["read","design","modify","export","manufacture"]),requiresApproval:z.boolean()})).default([]),expectedVerification:z.array(z.string()).default([])});
+export const EngineeringFactKind=z.enum(["decision","assumption","constraint","acceptance_criterion"]);export type EngineeringFactKind=z.infer<typeof EngineeringFactKind>;
+export const EngineeringFact=z.object({id:z.string().optional(),kind:EngineeringFactKind,key:z.string().min(1),statement:z.string().min(1),value:z.unknown().default(null),supersedesId:z.string().optional()});export type EngineeringFact=z.infer<typeof EngineeringFact>;
+const PlanStep=z.object({id:z.string().min(1),title:z.string().min(1),description:z.string().min(1),operationClass:z.enum(["read","design","modify","export","manufacture"]),requiresApproval:z.boolean()});
+export const EngineeringPlan=z.object({id:z.string().default(()=>`PLAN-${randomUUID().slice(0,8)}`),objective:z.string().min(1),assumptions:z.array(z.string()).default([]),requirements:z.array(Requirement).default([]),steps:z.array(PlanStep).min(1,"Engineering plan must contain at least one executable step").default([]),expectedVerification:z.array(z.string()).default([])});
 export type EngineeringPlan=z.infer<typeof EngineeringPlan>;
 export function classifyOperation(operation:string){const n=operation.toLowerCase();if(/(read|inspect|screenshot|search|recent|documentation)/.test(n))return "read" as const;if(/(manufactur|machine|cnc|printer|toolpath|g-?code|dispatch)/.test(n))return "manufacture" as const;if(/(export|download|postprocess)/.test(n))return "export" as const;if(/(create|modify|update|delete|move|extrude|sketch|feature|component|body)/.test(n))return "modify" as const;return "design" as const;}
