@@ -114,7 +114,7 @@ This project targets benign civilian engineering and robotics. Autonomous softwa
 
 ### Phase 2 — Autonomous CAD and mechanical design **[current]**
 - [x] Parametric design representation independent of a single CAD vendor — canonical metric model, named dimensional parameters, vendor-neutral mechanical features, validation, and deterministic serialization.
-- [ ] CAD state snapshots, diffs, revisions, rollback, and deterministic replay.
+- [x] CAD state snapshots, deterministic diffs, immutable revisions, hash-verified replay, revision-targeted rollback, and auditable rollback-as-a-new-revision semantics.
 - [ ] Multi-part assemblies, joints, fasteners, tolerances, materials, and manufacturability checks.
 - [ ] Automated drawing/document generation.
 - [ ] Design-space exploration and constrained optimization.
@@ -187,4 +187,4 @@ This project targets benign civilian engineering and robotics. Autonomous softwa
 
 ## Development rule
 
-`main` / `origin/main` is the sole development branch. On `continue`, start at the first incomplete item in the active phase. Finish the item end-to-end—including code, tests, migrations, docs, diagnostics, and CI—before marking it complete or advancing. Never treat a stub, mock-only path, or unverified integration as completion.
+`main` / `origin/main` is the sole development branch. On `continue`, start at the first incomplete item in the active phase. Finish the item end-to-end—including code, tests, documentation, migrations, diagnostics, and CI—before marking it complete or advancing. Never treat a stub, mock-only path, or unverified integration as completion.
