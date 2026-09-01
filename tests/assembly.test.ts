@@ -28,9 +28,9 @@ describe("vendor-neutral mechanical assemblies", () => {
   });
 
   it("detects disconnected parts and preserves deterministic ordering", () => {
-    const disconnected = { ...base, joints: [], parts: [...base.parts].reverse() };
-    expect(checkAssemblyManufacturability(disconnected, models)[0].code).toBe("DISCONNECTED_PART");
-    expect(canonicalAssemblyJson(base)).toBe(canonicalAssemblyJson(disconnected).replace('"joints":[]', '"joints":[]'));
+    const reordered = { ...base, parts: [...base.parts].reverse(), joints: [...base.joints].reverse(), fasteners: [...base.fasteners].reverse() };
+    expect(checkAssemblyManufacturability({ ...base, joints: [] }, models)[0].code).toBe("DISCONNECTED_PART");
+    expect(canonicalAssemblyJson(base)).toBe(canonicalAssemblyJson(reordered));
   });
 
   it("rejects tolerances that can make a dimension non-positive", () => {
