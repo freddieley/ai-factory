@@ -29,7 +29,7 @@ export function messageForCycleEvent(event:FactoryStreamEvent):string|null{
     case "run.budget_exhausted": return "The execution budget was reached safely. Review the run before retrying.";
     case "factory.followup.completed": return "Follow-up completed.";
     case "factory.conversation.assistant": return typeof payload.message==="string"?payload.message:null;
-    case "factory.conversation.response": return typeof payload.message==="string"?payload.message:null;
+    case "factory.conversation.response": return null;
     default: return null;
   }
 }
