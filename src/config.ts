@@ -11,6 +11,8 @@ const schema = z.object({
   FIREWORKS_MODEL: z.string().default("accounts/fireworks/models/glm-5p2"),
   FUSION_MCP_URL: z.string().default("http://127.0.0.1:27182/mcp"),
   FUSION_MCP_ENABLED: z.coerce.boolean().default(true),
+  KICAD_CLI_PATH: z.string().default("kicad-cli"),
+  KICAD_WORKSPACE_ROOT: z.string().default("./data/kicad"),
   MAX_AGENT_STEPS: z.coerce.number().int().min(1).max(50).default(12),
   MAX_MODEL_CALLS: z.coerce.number().int().min(1).max(20).default(4),
   MAX_TOOL_CALLS: z.coerce.number().int().min(1).max(100).default(30),
