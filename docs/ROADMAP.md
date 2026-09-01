@@ -8,7 +8,7 @@ This is the execution queue for the factory. Work is complete only when implemen
 - [x] Engineering knowledge base with units, tolerances, materials, components, standards, manufacturing constraints, and provenance fields.
 - [x] Evidence source registry with attribution, confidence, timestamps, expiry, and content hashes.
 - [x] Evidence claim registry with project isolation and freshness-aware retrieval.
-- [ ] BOM and component lifecycle management.
+- [x] BOM and component lifecycle management — versioned project BOMs, component references, single approved revision, lifecycle history and evidence linkage.
 - [ ] Supplier/component discovery with availability, cost, lead-time, and approved-source records.
 - [ ] Change impact analysis and design review gates.
 
