@@ -10,9 +10,6 @@ export const db = new Database(config.DATABASE_PATH);
 db.pragma("journal_mode = WAL");
 db.pragma("foreign_keys = ON");
 
-// The factory is expected to survive application upgrades without losing its
-// project/run history. Keep the bootstrap schema idempotent, then add missing
-// columns for databases created by earlier versions.
 db.exec(`
 CREATE TABLE IF NOT EXISTS projects (
   id TEXT PRIMARY KEY,
@@ -83,9 +80,9 @@ function addColumnIfMissing(table: string, column: string, definition: string) {
   if (!tableColumns(table).has(column)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
 }
 
-// Backward-compatible migrations for databases created before the kernel
-// persistence layer existed. SQLite cannot add a NOT NULL column without a
-// default, so migration defaults are deliberately conservative.
+// Upgrade databases created by older factory builds in-place. The defaults
+// make the migration safe for existing rows while new writes always provide
+// real timestamps and structured values.
 addColumnIfMissing("requirements", "source", "TEXT NOT NULL DEFAULT 'unknown'");
 addColumnIfMissing("requirements", "key", "TEXT NOT NULL DEFAULT 'unspecified'");
 addColumnIfMissing("requirements", "value", "TEXT NOT NULL DEFAULT ''");
@@ -97,15 +94,13 @@ addColumnIfMissing("artifacts", "parent_artifact_id", "TEXT");
 addColumnIfMissing("artifacts", "kind", "TEXT NOT NULL DEFAULT 'unknown'");
 addColumnIfMissing("artifacts", "name", "TEXT NOT NULL DEFAULT 'artifact'");
 addColumnIfMissing("artifacts", "uri", "TEXT");
-addColumnIfMissing("artifacts", "metadata", "TEXT NOT NULL DEFAULT '{}' ");
+addColumnIfMissing("artifacts", "metadata", "TEXT NOT NULL DEFAULT '{}'");
 addColumnIfMissing("artifacts", "created_at", "TEXT NOT NULL DEFAULT ''");
 
-// Repair legacy rows migrated with an empty timestamp. This also makes old
-// databases satisfy the same invariants as newly-created databases.
-const now = new Date().toISOString();
-db.prepare(`UPDATE requirements SET created_at=? WHERE created_at=''`).run(now);
+const migrationNow = new Date().toISOString();
+db.prepare(`UPDATE requirements SET created_at=? WHERE created_at=''`).run(migrationNow);
 db.prepare(`UPDATE requirements SET updated_at=created_at WHERE updated_at=''`).run();
-db.prepare(`UPDATE artifacts SET created_at=? WHERE created_at=''`).run(now);
+db.prepare(`UPDATE artifacts SET created_at=? WHERE created_at=''`).run(migrationNow);
 
 export function createProject(name: string, description: string) {
   const id = randomUUID();
@@ -144,11 +139,21 @@ export function updateRequirementStatus(id: string, status: string) {
   db.prepare(`UPDATE requirements SET status=?, updated_at=? WHERE id=?`).run(status, new Date().toISOString(), id);
 }
 
-export function createArtifact(projectId: string, kind: string, name: string, uri?: string | null, metadata?: unknown, runId?: string | null, parentArtifactId?: string | null) {
+// parentArtifactId is intentionally the sixth argument: lineage is the most
+// important relationship for the kernel. runId remains available as the
+// seventh optional argument so artifacts can also be traced to an execution.
+export function createArtifact(
+  projectId: string,
+  kind: string,
+  name: string,
+  uri?: string | null,
+  metadata?: unknown,
+  parentArtifactId?: string | null,
+  runId?: string | null,
+) {
   const id = randomUUID();
-  const createdAt = new Date().toISOString();
   db.prepare(`INSERT INTO artifacts (id,project_id,run_id,parent_artifact_id,kind,name,uri,metadata,created_at) VALUES (?,?,?,?,?,?,?,?,?)`)
-    .run(id, projectId, runId ?? null, parentArtifactId ?? null, kind, name, uri ?? null, JSON.stringify(metadata ?? {}), createdAt);
+    .run(id, projectId, runId ?? null, parentArtifactId ?? null, kind, name, uri ?? null, JSON.stringify(metadata ?? {}), new Date().toISOString());
   return id;
 }
 export function getArtifact(id: string) { return db.prepare(`SELECT * FROM artifacts WHERE id=?`).get(id); }
