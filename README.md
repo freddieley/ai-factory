@@ -40,7 +40,9 @@ Simulation → Manufacturing → Physical Test → Iteration
 - Deterministic CAD primitives and verification evidence.
 - Versioned SQLite migrations with legacy-schema repair and migration tests.
 - Persistent projects, runs, factory cycles, events, requirements, artifacts, lineage, approvals, plans, work orders, and lifecycle stages.
-- First-class cycle/run/event lineage with cycle and run APIs.
+- Engineering knowledge records for materials, components, standards, and manufacturing constraints.
+- Evidence/provenance records with freshness metadata.
+- Versioned BOMs, component lifecycle history, supplier records, observed supplier offers, procurement ranking, and explicit approved-source records.
 - Approval gates for manufacturing, physical testing, and release.
 - Browser console, JSON API, structured Fastify request logging, diagnostics, reproducible npm installs, CI quality checks, and automated contract tests.
 
@@ -101,10 +103,10 @@ This project targets benign civilian engineering and robotics. Autonomous softwa
 ### Phase 1 — Engineering knowledge and digital thread **[current]**
 - [x] Versioned requirements, decisions, assumptions, constraints, and acceptance criteria.
 - [x] First-class artifact/revision graph connecting engineering artifacts through explicit lineage and revision history.
-- [ ] Engineering knowledge base with units, tolerances, materials, components, standards, and provenance.
-- [ ] Retrieval and evidence layer with source attribution and freshness tracking.
-- [ ] BOM and component lifecycle management.
-- [ ] Supplier/component discovery with availability, cost, lead-time, and approved-source records.
+- [x] Engineering knowledge base with units, tolerances, materials, components, standards, manufacturing constraints, and provenance fields.
+- [x] Retrieval/evidence foundation with source attribution, confidence, timestamps, expiry, and content hashes.
+- [x] BOM and component lifecycle management — versioned project BOMs, component references, single approved revision, lifecycle history and evidence linkage.
+- [x] Supplier/component discovery — project-scoped suppliers, observed offers, availability/cost/lead-time data, provenance, freshness, procurement ranking, and explicit approved-source records.
 - [ ] Change impact analysis and design review gates.
 
 ### Phase 2 — Autonomous CAD and mechanical design
@@ -170,16 +172,16 @@ This project targets benign civilian engineering and robotics. Autonomous softwa
 - [ ] Resource-aware scheduling across compute, machines, inventory, and test capacity.
 - [ ] Long-running jobs with checkpointing, resumability, retries, and recovery.
 - [ ] Provenance, audit trails, reproducibility, and release manifests.
-- [ ] Operator dashboard for the complete factory state.
+- [ ] Operator dashboard for complete factory state.
 
-### Phase 10 — Production-grade autonomous R&D system
-- [ ] Local deployment with no dependency on external inference for normal operation.
-- [ ] Model evaluation, regression suites, versioning, rollback, and controlled model upgrades.
+### Phase 10 — Production-grade autonomous R&D
+- [ ] Local deployment with no external inference dependency for normal operation.
+- [ ] Model evaluation, regression suites, versioning, rollback, and controlled upgrades.
 - [ ] Continuous improvement from accumulated engineering/test evidence.
 - [ ] Multi-project resource scheduling and isolation.
-- [ ] Production observability, security, backups, disaster recovery, and data retention.
-- [ ] End-to-end acceptance test: a single sufficiently specified civilian robotics request produces a validated software/hardware design, simulation evidence, approved physical build, physical-test evidence, and an auditable release package.
+- [ ] Production observability, security, backups, disaster recovery, and retention.
+- [ ] End-to-end acceptance: a sufficiently specified benign civilian robotics request produces a validated software/hardware design, simulation evidence, approved physical build, physical-test evidence, and an auditable release package.
 
 ## Development rule
 
-`main` / `origin/main` is the sole development branch. Future `continue` iterations should read `GOAL.md` and this roadmap, identify the first incomplete item in the active phase, implement it fully, add or update tests, update migrations/docs/configuration/diagnostics as required, and verify the repository before moving to the next item. Do not mark roadmap work complete merely because code exists: it must be integrated, tested, documented, and operationally coherent.
+`main` / `origin/main` is the sole development branch. On `continue`, start at the first incomplete item in the active phase. Finish the item end-to-end—including code, tests, migrations, docs, diagnostics, and CI—before marking it complete or advancing. Never treat a stub, mock-only path, or unverified integration as completion.
