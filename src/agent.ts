@@ -4,6 +4,7 @@ import { addEvent, finishRun, createRun } from "./db.js";
 import { fusion } from "./fusion.js";
 import { getClient, providerInfo } from "./providers.js";
 import { ExecutionController, withTimeout } from "./execution.js";
+import { executeCreateBox } from "./cad.js";
 
 const SYSTEM = `
 You are AI Factory, a fast, disciplined engineering agent for civilian robotics and CAD work.
@@ -12,8 +13,10 @@ Your job is to help users design, analyze, document, and prepare benign engineer
 
 Execution rules:
 - Prefer the smallest number of tool calls that can establish the requested result.
-- For a request to create a new Fusion design, do NOT search recent documents first. Create the document directly with the Fusion API.
-- For simple deterministic geometry, prefer ONE fusion_mcp_execute script followed by ONE read/verification call.
+- For simple deterministic rectangular geometry, use the local ai_factory_create_box tool instead of writing Fusion Python yourself.
+- For a request to create a new Fusion design, do NOT search recent documents first.
+- Prefer ONE deterministic CAD tool call for simple geometry, because it creates and verifies the result in one operation.
+- Use fusion_mcp_read for inspection and verification when the deterministic tool does not already return sufficient verification data.
 - Never claim a Fusion operation succeeded unless its result confirms it.
 - If a Fusion tool returns an error, diagnose that exact error before retrying. Do not repeat or guess with unrelated API methods.
 - Do not retry an identical tool call after it has failed unless the arguments or diagnosis changed.
@@ -24,20 +27,16 @@ Execution rules:
 
 Fusion Python API facts:
 - Get the application with adsk.core.Application.get().
-- Create a new Fusion design with app.documents.add(adsk.core.DocumentTypes.FusionDesignDocumentType).
-- Get the active design with adsk.fusion.Design.cast(app.activeProduct).
+- Autodesk's supported new-design workflow is app.documents.add(adsk.core.DocumentTypes.FusionDesignDocumentType), followed by adsk.fusion.Design.cast(app.activeProduct).
 - Get the root component with design.rootComponent.
 - Add a sketch with rootComp.sketches.add(rootComp.xYConstructionPlane) or another construction plane.
-- Create a rectangle with sketch.sketchCurves.sketchLines.addTwoPointRectangle(Point3D.create(x1,y1,0), Point3D.create(x2,y2,0)).
+- Create a rectangle with sketch.sketchCurves.sketchLines.addTwoPointRectangle(...).
 - Get the profile with sketch.profiles.item(0).
-- Create an extrusion with rootComp.features.extrudeFeatures.createInput(profile, adsk.fusion.FeatureOperations.NewBodyFeatureOperation), then extInput.setDistanceExtent(False, adsk.core.ValueInput.createByReal(distance)), then extrudes.add(extInput).
-- Do NOT use adsk.fusion.Design.get(), adsk.fusion.Design.create(), createSketchOn(), or createExtrude(); those are not valid for this desktop Fusion API workflow.
-- Fusion API lengths used by ValueInput.createByReal are centimeters in the standard API examples. When a user specifies millimetres, convert mm to cm before createByReal. For example 50 mm = 5.0 and 5 mm = 0.5.
-- For verification, use the resulting BRep body's boundingBox and convert its xLength/yLength/zLength from cm to mm.
+- Create an extrusion with rootComp.features.extrudeFeatures.createInput(...), setDistanceExtent(...), then extrudes.add(...).
+- Do NOT use adsk.fusion.Design.get(), adsk.fusion.Design.create(), createSketchOn(), or createExtrude().
+- Fusion API lengths passed to ValueInput.createByReal are centimeters in this workflow. Convert millimetres to centimetres.
 
-For the 50 x 50 x 5 mm benchmark specifically, use a single new document, one XY-plane sketch, one rectangle from (0,0) to (5,5), and one 0.5 cm extrusion. Return compact diagnostic output from the script.
-
-Performance target: finish routine CAD tasks in seconds, not minutes. Keep responses and tool arguments compact.
+Performance target: routine CAD tasks should complete in seconds, not minutes. Keep responses and tool arguments compact.
 `;
 
 type ToolCall = {
@@ -46,15 +45,38 @@ type ToolCall = {
   function: { name: string; arguments: string };
 };
 
-function mcpToolsAsOpenAI(): OpenAI.Chat.Completions.ChatCompletionTool[] {
-  return fusion.getTools().map((tool) => ({
+const LOCAL_CAD_TOOLS: OpenAI.Chat.Completions.ChatCompletionTool[] = [
+  {
     type: "function",
     function: {
-      name: `fusion__${tool.name}`,
-      description: tool.description ?? `Autodesk Fusion tool: ${tool.name}`,
-      parameters: tool.inputSchema ?? { type: "object", properties: {} }
+      name: "ai_factory_create_box",
+      description: "Create and verify a rectangular solid in a new Fusion design. Use for simple box/plate geometry.",
+      parameters: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          widthMm: { type: "number", description: "Width in millimetres." },
+          depthMm: { type: "number", description: "Depth in millimetres." },
+          heightMm: { type: "number", description: "Height in millimetres." }
+        },
+        required: ["widthMm", "depthMm", "heightMm"]
+      }
     }
-  }));
+  }
+];
+
+function mcpToolsAsOpenAI(): OpenAI.Chat.Completions.ChatCompletionTool[] {
+  return [
+    ...LOCAL_CAD_TOOLS,
+    ...fusion.getTools().map((tool) => ({
+      type: "function" as const,
+      function: {
+        name: `fusion__${tool.name}`,
+        description: tool.description ?? `Autodesk Fusion tool: ${tool.name}`,
+        parameters: tool.inputSchema ?? { type: "object", properties: {} }
+      }
+    }))
+  ];
 }
 
 function getFunctionToolCalls(
@@ -144,12 +166,6 @@ export async function runAgent(projectId: string, prompt: string) {
       for (const call of functionToolCalls) {
         if (!controller.canToolCall()) break;
         const rawName = call.function.name;
-        if (!rawName.startsWith("fusion__")) {
-          messages.push({ role: "tool", tool_call_id: call.id, content: JSON.stringify({ error: "Unknown tool namespace." }) });
-          continue;
-        }
-
-        const toolName = rawName.slice("fusion__".length);
         let args: Record<string, unknown>;
         try {
           args = JSON.parse(call.function.arguments || "{}") as Record<string, unknown>;
@@ -157,29 +173,40 @@ export async function runAgent(projectId: string, prompt: string) {
           args = {};
         }
 
-        if (controller.isRepeated(toolName, args)) {
+        if (controller.isRepeated(rawName, args)) {
           const content = JSON.stringify({ error: "Repeated tool call blocked. Use the previous result or change the request." });
-          addEvent(runId, "tool.repeated", { step, toolName, args });
+          addEvent(runId, "tool.repeated", { step, toolName: rawName, args });
           messages.push({ role: "tool", tool_call_id: call.id, content });
           continue;
         }
 
         controller.recordToolCall();
         const toolStarted = Date.now();
-        addEvent(runId, "tool.call", { step, toolName, args, call: controller.toolCalls });
+        addEvent(runId, "tool.call", { step, toolName: rawName, args, call: controller.toolCalls });
 
         try {
-          const result = await withTimeout(
-            fusion.callTool(toolName, args),
-            config.TOOL_TIMEOUT_MS,
-            `Fusion tool ${toolName}`
-          );
+          let result: unknown;
+          if (rawName === "ai_factory_create_box") {
+            result = await executeCreateBox(args);
+          } else {
+            if (!rawName.startsWith("fusion__")) {
+              result = { error: "Unknown tool namespace." };
+            } else {
+              const toolName = rawName.slice("fusion__".length);
+              result = await withTimeout(
+                fusion.callTool(toolName, args),
+                config.TOOL_TIMEOUT_MS,
+                `Fusion tool ${toolName}`
+              );
+            }
+          }
+
           const content = unwrapMcpResult(result);
-          addEvent(runId, "tool.result", { step, toolName, elapsedMs: Date.now() - toolStarted, result });
+          addEvent(runId, "tool.result", { step, toolName: rawName, elapsedMs: Date.now() - toolStarted, result });
           messages.push({ role: "tool", tool_call_id: call.id, content });
         } catch (error) {
-          const content = JSON.stringify({ error: String(error), toolName });
-          addEvent(runId, "tool.error", { step, toolName, elapsedMs: Date.now() - toolStarted, error: String(error) });
+          const content = JSON.stringify({ error: String(error), toolName: rawName });
+          addEvent(runId, "tool.error", { step, toolName: rawName, elapsedMs: Date.now() - toolStarted, error: String(error) });
           messages.push({ role: "tool", tool_call_id: call.id, content });
         }
       }
