@@ -12,6 +12,6 @@ describe("factory stream presentation",()=>{
     const frame=sse("message",{role:"assistant",text:"Readable answer"});
     expect(frame).toContain("event: message");
     expect(frame).toContain('"text":"Readable answer"');
-    expect(frame.endsWith("\\n\\n")).toBe(true);
+    expect(frame.endsWith("\n\n")).toBe(true);
   });
 });
