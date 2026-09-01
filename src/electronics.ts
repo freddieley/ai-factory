@@ -22,7 +22,6 @@ export const ElectronicsFunctionalBlock = z.object({
 export const ElectronicsPowerDomain = z.object({
   name: z.string().min(1),
   nominalVoltageV: z.number().positive(),
-  maxCurrentA: z.number().positive().optional(),
   requirementIds: z.array(z.string().min(1)).min(1),
 });
 
@@ -37,6 +36,7 @@ export const ElectronicsArchitecture = z.object({
   name: z.string().min(1),
   requirements: z.array(ElectronicsRequirement).min(1),
   powerDomains: z.array(ElectronicsPowerDomain),
+  systemMaxCurrentA: z.number().positive().optional(),
   functionalBlocks: z.array(ElectronicsFunctionalBlock).min(1),
   interfaces: z.array(ElectronicsInterface),
   openQuestions: z.array(z.string().min(1)),
@@ -94,9 +94,10 @@ function protocolFromRequirement(requirement: ElectronicsRequirement): string | 
 
 export function buildRequirementsDrivenElectronicsArchitecture(input: unknown, name = "Requirements-driven electronics architecture"): ElectronicsArchitecture {
   const requirements = z.array(ElectronicsRequirement).min(1).parse(input);
-  const powerByVoltage = new Map<number, { requirementIds: string[]; maxCurrentA?: number }>();
+  const powerByVoltage = new Map<number, string[]>();
   const blocksByType = new Map<z.infer<typeof FunctionalBlockType>, { requirementIds: string[]; name: string }>();
   const interfacesByProtocol = new Map<string, string[]>();
+  let systemMaxCurrentA: number | undefined;
 
   for (const requirement of requirements) {
     const type = inferBlockType(requirement);
@@ -107,14 +108,9 @@ export function buildRequirementsDrivenElectronicsArchitecture(input: unknown, n
     const unit = requirement.unit?.toUpperCase();
     const value = numericRequirementValue(requirement);
     if (unit === "V" && value !== null && value > 0) {
-      const domain = powerByVoltage.get(value) ?? { requirementIds: [] };
-      domain.requirementIds.push(requirement.id);
-      powerByVoltage.set(value, domain);
+      powerByVoltage.set(value, [...(powerByVoltage.get(value) ?? []), requirement.id]);
     }
-    if (unit === "A" && value !== null && value > 0) {
-      const domain = powerByVoltage.values().next().value as { requirementIds: string[]; maxCurrentA?: number } | undefined;
-      if (domain) domain.maxCurrentA = Math.max(domain.maxCurrentA ?? 0, value);
-    }
+    if (unit === "A" && value !== null && value > 0) systemMaxCurrentA = Math.max(systemMaxCurrentA ?? 0, value);
 
     const protocol = protocolFromRequirement(requirement);
     if (protocol) interfacesByProtocol.set(protocol, [...(interfacesByProtocol.get(protocol) ?? []), requirement.id]);
@@ -129,11 +125,10 @@ export function buildRequirementsDrivenElectronicsArchitecture(input: unknown, n
 
   const powerDomains = [...powerByVoltage.entries()]
     .sort(([a], [b]) => a - b)
-    .map(([voltage, value]) => ({
+    .map(([voltage, requirementIds]) => ({
       name: `${voltage} V rail`,
       nominalVoltageV: voltage,
-      ...(value.maxCurrentA ? { maxCurrentA: value.maxCurrentA } : {}),
-      requirementIds: [...new Set(value.requirementIds)],
+      requirementIds: [...new Set(requirementIds)],
     }));
 
   const interfaces = [...interfacesByProtocol.entries()]
@@ -153,6 +148,7 @@ export function buildRequirementsDrivenElectronicsArchitecture(input: unknown, n
     name,
     requirements,
     powerDomains,
+    ...(systemMaxCurrentA === undefined ? {} : { systemMaxCurrentA }),
     functionalBlocks,
     interfaces,
     openQuestions,
