@@ -8,18 +8,29 @@ The mechanical factory keeps design intent in the vendor-neutral parametric mode
 
 ## Diff
 
-`diffCadStates` compares named dimensional parameters and feature definitions without invoking a CAD vendor. This gives the orchestration layer a deterministic change summary before an adapter is allowed to execute a change.
+`diffCadStates` compares named dimensional parameters and feature definitions without invoking a CAD vendor. `diffCadRevisions` applies the same deterministic comparison to two persisted revisions. This gives the orchestration layer an explicit change summary before an adapter is allowed to execute a change.
 
 ## Revision
 
-`appendArtifactRevision` appends a monotonically increasing immutable revision to an existing artifact. `appendCadSnapshot` uses that primitive for CAD-specific history.
+`appendArtifactRevision` appends a monotonically increasing immutable revision to an existing artifact. `appendCadSnapshot` uses that primitive for CAD-specific history. Revision payloads are hash-checked when replayed, so corrupted history is rejected rather than silently accepted.
 
-## Restore and replay
+## Restore, rollback, and replay
 
-`restoreCadSnapshot` verifies the stored hash before returning a snapshot suitable as a rollback target. `replayCadHistory` verifies every CAD snapshot revision in order, allowing a deterministic reconstruction of the recorded design history.
+`restoreCadSnapshot` validates the original artifact snapshot and returns it as a rollback target. `replayCadHistory` validates every CAD snapshot revision in order and reconstructs the recorded state sequence deterministically.
 
-A future CAD adapter will consume these states to perform an actual native rollback. Until then, the control plane never pretends that restoring JSON is equivalent to modifying a live CAD document.
+`rollbackCadSnapshot(artifactId, targetRevision)` **does not mutate or delete history**. It appends a new immutable revision containing an exact canonical copy of the selected historical state and records which revision it rolled back to in the returned result. Consequently, rollback is itself auditable and replayable.
+
+The control-plane rollback is deliberately separate from native CAD mutation. A future CAD adapter will consume the resulting state and perform an actual native-document rollback only through the existing capability, policy, and approval boundaries. The control plane never pretends that restoring JSON is equivalent to modifying a live CAD document.
+
+## Invariants
+
+- Snapshot hashes are deterministic for semantically identical canonical models.
+- Historical revisions are immutable.
+- Replay validates every stored content hash.
+- Rollback creates a new revision rather than rewriting history.
+- Invalid or out-of-range revision identifiers are rejected.
+- CAD state operations do not manufacture anything or dispatch physical machine commands.
 
 ## Safety
 
-Snapshot and diff operations do not manufacture anything and do not dispatch physical machine commands. Physical execution remains behind the existing approval and policy boundary.
+Snapshot, diff, rollback, and replay operations are non-physical. Manufacturing, physical testing, and release remain behind the existing approval and policy boundary.
