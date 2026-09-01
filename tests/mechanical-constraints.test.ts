@@ -66,7 +66,7 @@ describe("advanced mechanical constraints", () => {
       datums: { plate: [{ id: "A", role: "primary", normal: [0, 0, 1], xDirection: [1, 0, 0] }] },
     };
     const findings = checkMechanicalConstraints(input, { plate: model });
-    expect(findings.map(f => f.code)).toEqual(["MACHINE_MATERIAL_UNSUPPORTED", "MACHINE_ENVELOPE_EXCEEDED"]);
+    expect(findings.map(f => f.code)).toEqual(["MACHINE_ENVELOPE_EXCEEDED", "MACHINE_MATERIAL_UNSUPPORTED"]);
     expect(findings.every(f => f.evidenceIds)).toBe(true);
   });
 });
