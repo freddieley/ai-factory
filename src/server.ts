@@ -7,19 +7,38 @@ export { app } from "./api.js";
 
 const publicRoot = fileURLToPath(new URL("../public/", import.meta.url));
 
-async function sendPublicFile(reply: any, filename: string, contentType: string) {
+async function readPublicFile(filename: string) {
+  return readFile(`${publicRoot}${filename}`);
+}
+
+// Keep the browser application on explicit Fastify routes rather than a global
+// request hook. This makes the static asset contract unambiguous and prevents
+// an HTML fallback from ever being returned for /app.js.
+app.get("/", async (_request, reply) => {
   try {
-    const content = await readFile(`${publicRoot}${filename}`);
-    return reply.type(contentType).send(content);
+    const content = await readPublicFile("index.html");
+    return reply.type("text/html; charset=utf-8").header("cache-control", "no-store").send(content);
   } catch {
     return reply.code(404).send({ error: "asset not found" });
   }
-}
+});
 
-app.addHook("onRequest", async (request, reply) => {
-  if (request.url === "/") return sendPublicFile(reply, "index.html", "text/html; charset=utf-8");
-  if (request.url === "/app.js") return sendPublicFile(reply, "app.js", "application/javascript; charset=utf-8");
-  if (request.url === "/styles.css") return sendPublicFile(reply, "styles.css", "text/css; charset=utf-8");
+app.get("/app.js", async (_request, reply) => {
+  try {
+    const content = await readPublicFile("app.js");
+    return reply.type("application/javascript; charset=utf-8").header("cache-control", "no-store").send(content);
+  } catch {
+    return reply.code(404).send({ error: "asset not found" });
+  }
+});
+
+app.get("/styles.css", async (_request, reply) => {
+  try {
+    const content = await readPublicFile("styles.css");
+    return reply.type("text/css; charset=utf-8").header("cache-control", "no-store").send(content);
+  } catch {
+    return reply.code(404).send({ error: "asset not found" });
+  }
 });
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
