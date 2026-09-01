@@ -6,7 +6,7 @@ The repository is deliberately being built as a staged autonomy stack. The curre
 
 See **[GOAL.md](./GOAL.md)** for the complete end-state specification and design principles. Treat the roadmap below as the canonical development queue: when continuing development, finish the current phase completely—including implementation, tests, documentation, migrations, diagnostics, and CI—before moving forward.
 
-### Phase 2 — Autonomous CAD and mechanical design **[current]**
+### Phase 2 — Autonomous CAD and mechanical design **[complete]**
 - [x] Parametric design representation independent of a single CAD vendor — canonical metric model, named dimensional parameters, vendor-neutral mechanical features, validation, and deterministic serialization.
 - [x] CAD state snapshots, deterministic diffs, immutable revisions, hash-verified replay, revision-targeted rollback, and auditable rollback-as-new-revision semantics.
 - [x] Multi-part assembly foundation — stable parts, joints, fasteners, tolerances, materials, deterministic serialization, and baseline manufacturability findings.
@@ -16,8 +16,8 @@ See **[GOAL.md](./GOAL.md)** for the complete end-state specification and design
 - [x] Design-space exploration and constrained optimization — bounded deterministic candidate enumeration, constraint filtering, objective ranking, factory capability discovery, API execution, and persisted hash-verified exploration artifacts.
 - [x] Geometry/feature validation and regression tests against known designs.
 
-### Phase 3 — Electronics and embedded systems
-- [ ] Requirements-driven electronics architecture.
+### Phase 3 — Electronics and embedded systems **[current]**
+- [x] Requirements-driven electronics architecture — deterministic architecture synthesis from project electrical requirements, requirement traceability, power-domain extraction, functional blocks, interface identification, explicit open questions, capability discovery, API execution, hash-identified artifact persistence, and unit/API regression coverage.
 - [ ] Schematic and PCB design tool integration.
 - [ ] Component selection and electrical rule checking.
 - [ ] Power, thermal, signal-integrity, and interface analysis.
