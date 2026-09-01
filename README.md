@@ -13,7 +13,7 @@ See **[GOAL.md](./GOAL.md)** for the complete end-state specification and design
 - [x] Assembly engineering constraints — coordinate frames, joint limits, material/process compatibility, mass estimation where geometry permits, and machine/process capability checks.
 - [ ] Robust geometric transforms, datum schemes, fit/clearance analysis, richer material/process data, and machine-specific capability evidence.
 - [ ] Automated drawing/document generation.
-- [ ] Design-space exploration and constrained optimization.
+- [x] Design-space exploration and constrained optimization — bounded deterministic candidate enumeration, constraint filtering, objective ranking, factory capability discovery, API execution, and persisted hash-verified exploration artifacts.
 - [ ] Geometry/feature validation and regression tests against known designs.
 
 ### Phase 3 — Electronics and embedded systems
