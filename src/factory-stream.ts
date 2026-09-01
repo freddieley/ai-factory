@@ -2,18 +2,25 @@ export type FactoryStreamEvent={id:string;type:string;payload:string;created_at:
 
 function payloadOf(event:FactoryStreamEvent):Record<string,unknown>{try{return JSON.parse(event.payload) as Record<string,unknown>;}catch{return {};}}
 
+function toolMessage(toolName:string):string{
+  if(toolName==="ai_factory_inspect_fusion") return "Inspecting the current Fusion document.";
+  if(toolName.startsWith("ai_factory_create_")) return `Creating ${toolName.replace("ai_factory_create_","").replaceAll("_"," ")} with the factory capability.`;
+  if(toolName.startsWith("ai_factory_")) return `Running ${toolName.replace("ai_factory_","").replaceAll("_"," ")} factory capability.`;
+  return `Running factory tool ${toolName}.`;
+}
+
 export function messageForCycleEvent(event:FactoryStreamEvent):string|null{
   const payload=payloadOf(event);
   switch(event.type){
-    case "factory.cycle.started": return "Factory cycle started. I’m understanding the objective and constraints.";
-    case "factory.planning.started": return "I’m turning the request into a validated engineering plan.";
+    case "factory.cycle.started": return "Factory cycle started.";
+    case "factory.planning.started": return "Turning the request into a validated engineering plan.";
     case "factory.planning.completed": return `Engineering plan ready — ${String(payload.steps??0)} step${payload.steps===1?"":"s"} identified.`;
     case "factory.planning.failed": return `I couldn’t complete the engineering plan. ${String(payload.error??"Please review the cycle details.")}`;
     case "factory.iteration.started": return `Working through engineering iteration ${String(payload.iteration??"")}…`;
-    case "model.start": return `Reasoning about the current engineering state (step ${String(payload.step??"")}).`;
+    case "model.start": return `Processing engineering step ${String(payload.step??"")}…`;
     case "model.message": return typeof payload.content==="string"&&payload.content.trim()?payload.content:null;
-    case "tool.call": return `Using ${String(payload.toolName??"a factory tool")} to inspect or modify the design.`;
-    case "tool.result": return `Factory tool completed: ${String(payload.toolName??"operation")}.`;
+    case "tool.call": return toolMessage(String(payload.toolName??"a factory tool"));
+    case "tool.result": return `Completed ${String(payload.toolName??"factory operation")}.`;
     case "tool.error": return `A factory tool reported an error: ${String(payload.error??"unknown error")}`;
     case "factory.iteration.completed": return "Engineering iteration completed; checking the verified result.";
     case "factory.verification.completed": return "Deterministic verification completed.";
