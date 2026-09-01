@@ -33,6 +33,8 @@ Simulation → Manufacturing → Physical Test → Iteration
 - Local-first model provider through an OpenAI-compatible API (Ollama) with optional Fireworks fallback.
 - Structured engineering planning from plain-language objectives.
 - Zod-validated requirements and engineering plans.
+- Versioned requirements plus decisions, assumptions, constraints, and acceptance criteria.
+- Versioned artifact history and explicit artifact lineage.
 - Bounded model/tool execution budgets and timeouts.
 - Dynamic Autodesk Fusion MCP capability discovery.
 - Deterministic CAD primitives and verification evidence.
@@ -97,8 +99,8 @@ This project targets benign civilian engineering and robotics. Autonomous softwa
 - [x] `.env.example`, operational setup, migration, and troubleshooting guidance aligned with runtime configuration.
 
 ### Phase 1 — Engineering knowledge and digital thread **[current]**
-- [ ] Versioned requirements, decisions, assumptions, constraints, and acceptance criteria.
-- [ ] First-class artifact/revision graph connecting prompts → plans → CAD → simulations → test results → releases.
+- [x] Versioned requirements, decisions, assumptions, constraints, and acceptance criteria.
+- [x] First-class artifact/revision graph connecting engineering artifacts through explicit lineage and revision history.
 - [ ] Engineering knowledge base with units, tolerances, materials, components, standards, and provenance.
 - [ ] Retrieval and evidence layer with source attribution and freshness tracking.
 - [ ] BOM and component lifecycle management.
