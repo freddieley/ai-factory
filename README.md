@@ -38,6 +38,7 @@ Simulation → Manufacturing → Physical Test → Iteration
 - Bounded model/tool execution budgets and timeouts.
 - Dynamic Autodesk Fusion MCP capability discovery.
 - Deterministic CAD primitives and verification evidence.
+- Vendor-neutral parametric mechanical design representation with bounded validation.
 - Versioned SQLite migrations with legacy-schema repair and migration tests.
 - Persistent projects, runs, factory cycles, events, requirements, artifacts, lineage, approvals, plans, work orders, and lifecycle stages.
 - Engineering knowledge records for materials, components, standards, and manufacturing constraints.
@@ -112,7 +113,7 @@ This project targets benign civilian engineering and robotics. Autonomous softwa
 - [x] Change impact analysis and design review gates — downstream artifact traversal, requirement/artifact traceability, persistent impact analyses, blocking findings, and deterministic approval decisions.
 
 ### Phase 2 — Autonomous CAD and mechanical design **[current]**
-- [ ] Parametric design representation independent of a single CAD vendor.
+- [x] Parametric design representation independent of a single CAD vendor — canonical metric model, named dimensional parameters, vendor-neutral mechanical features, validation, and deterministic serialization.
 - [ ] CAD state snapshots, diffs, revisions, rollback, and deterministic replay.
 - [ ] Multi-part assemblies, joints, fasteners, tolerances, materials, and manufacturability checks.
 - [ ] Automated drawing/document generation.
@@ -165,7 +166,7 @@ This project targets benign civilian engineering and robotics. Autonomous softwa
 - [ ] Controlled experiment generation and A/B design comparison.
 - [ ] Cost, performance, reliability, manufacturability, and schedule optimization.
 - [ ] Bounded iterative loops with explicit stop conditions and rollback.
-- [ ] Human review for high-impact decisions until the authorization system proves sufficient safety and reliability.
+- [ ] Human review for high-impact decisions until authorization controls are proven sufficient.
 
 ### Phase 9 — Full factory orchestration
 - [ ] One persistent product graph spanning requirements, mechanical, electrical, firmware, software, simulation, manufacturing, and testing.
