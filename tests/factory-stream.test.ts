@@ -8,8 +8,13 @@ describe("factory stream presentation",()=>{
     expect(messageForCycleEvent({id:"3",type:"model.message",payload:JSON.stringify({content:"Here is the result."}),created_at:""})).toBe("Here is the result.");
   });
 
-  it("renders conversational responses without engineering lifecycle noise",()=>{
-    expect(messageForCycleEvent({id:"4",type:"factory.conversation.response",payload:JSON.stringify({message:"What would you like to build?"}),created_at:""})).toBe("What would you like to build?");
+  it("renders the canonical conversational assistant event",()=>{
+    const event={id:"4",type:"factory.conversation.assistant",payload:JSON.stringify({message:"What would you like to build?",mode:"conversation"}),created_at:""};
+    expect(messageForCycleEvent(event)).toBe("What would you like to build?");
+  });
+
+  it("does not render the removed duplicate conversation response event",()=>{
+    expect(messageForCycleEvent({id:"5",type:"factory.conversation.response",payload:JSON.stringify({message:"duplicate"}),created_at:""})).toBeNull();
   });
 
   it("serializes SSE frames without mixing structured JSON into message text",()=>{
