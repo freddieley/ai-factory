@@ -9,4 +9,11 @@
     (44 "Edge.Cuts" user)
   )
   (setup (pad_to_mask_clearance 0))
+  (gr_rect
+    (start 10 10)
+    (end 90 90)
+    (stroke (width 0.05) (type default))
+    (fill none)
+    (layer "Edge.Cuts")
+  )
 )
