@@ -19,7 +19,7 @@ This is the execution queue for the factory. Work is complete only when implemen
 - [x] Assembly engineering constraints — coordinate frames, joint limits, material/process compatibility, mass estimation where geometry permits, and machine/process capability checks.
 - [x] Robust geometric transforms, datum schemes, fit/clearance analysis, richer material/process data, and machine-specific capability evidence.
 - [x] Automated drawing/document generation.
-- [ ] Design-space exploration and constrained optimization.
+- [x] Design-space exploration and constrained optimization — bounded deterministic candidate enumeration, constraint filtering, objective ranking, factory capability discovery, API execution, and persisted hash-verified exploration artifacts.
 - [ ] Geometry/feature validation and regression tests against known designs.
 
 ## Phase 3 — Electronics and embedded systems
