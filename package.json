@@ -10,7 +10,9 @@
     "build": "tsc -p tsconfig.json",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
-    "doctor": "tsx src/doctor.ts"
+    "doctor": "tsx src/doctor.ts",
+    "audit": "npm audit --audit-level=high",
+    "verify": "npm run typecheck && npm test && npm run build && npm run audit"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.17.5",
