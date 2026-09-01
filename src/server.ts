@@ -7,7 +7,7 @@ import { runAgent } from "./agent.js";
 import { registerLifecycleRoutes } from "./lifecycle-routes.js";
 import { runFactory, FactoryRequest } from "./factory.js";
 import { BomItem, createWorkOrder, getWorkOrder, listWorkOrders } from "./bom.js";
-import { getFusionLink, getPlan, linkFusionProject, listRequirements as listEngineeringRequirements, saveRequirements } from "./engineering-db.js";
+import { getFusionLink, getPlan, linkFusionProject, listRequirements as listEngineeringRequirements, saveRequirements, listVerificationRecords, addVerificationRecord } from "./engineering-db.js";
 import { Requirement } from "./engineering.js";
 import { listCapabilities } from "./capabilities.js";
 
@@ -23,6 +23,8 @@ app.patch("/api/requirements/:id", async(request,reply)=>{const {id}=request.par
 app.get("/api/projects/:id/artifacts", async(request,reply)=>{const {id}=request.params as {id:string};if(!getProject(id))return reply.code(404).send({error:"project not found"});return {artifacts:listArtifacts(id),links:listArtifactLinks(id)};});
 app.post("/api/projects/:id/artifacts", async(request,reply)=>{const {id}=request.params as {id:string};if(!getProject(id))return reply.code(404).send({error:"project not found"});const body=request.body as {runId?:string;kind?:string;name?:string;uri?:string;contentHash?:string;metadata?:unknown};if(!body?.kind||!body?.name)return reply.code(400).send({error:"kind and name are required"});return {id:createArtifact(id,body.runId,body.kind,body.name,body.uri,body.contentHash,body.metadata??{})};});
 app.post("/api/artifacts/:id/links", async(request,reply)=>{const {id}=request.params as {id:string};const body=request.body as {childArtifactId?:string;relation?:string};if(!body?.childArtifactId||!body?.relation)return reply.code(400).send({error:"childArtifactId and relation are required"});try{linkArtifacts(id,body.childArtifactId,body.relation);return {ok:true};}catch(error){return reply.code(400).send({error:String(error)});}});
+app.get("/api/projects/:id/verification", async(request,reply)=>{const {id}=request.params as {id:string};if(!getProject(id))return reply.code(404).send({error:"project not found"});return listVerificationRecords(id);});
+app.post("/api/projects/:id/verification", async(request,reply)=>{const {id}=request.params as {id:string};if(!getProject(id))return reply.code(404).send({error:"project not found"});const body=request.body as {runId?:string;requirementId?:string;status?:string;evidence?:unknown};if(!body?.status||!(["pass","fail","blocked"] as const).includes(body.status as "pass"|"fail"|"blocked")||body.evidence===undefined)return reply.code(400).send({error:"status (pass, fail, or blocked) and evidence are required"});return {id:addVerificationRecord({projectId:id,runId:body.runId,requirementId:body.requirementId,status:body.status as "pass"|"fail"|"blocked",evidence:body.evidence})};});
 app.get("/api/projects/:id/plan", async request=>{const {id}=request.params as {id:string};return getPlan(id);});
 app.get("/api/projects/:id/fusion-link", async request=>{const {id}=request.params as {id:string};return getFusionLink(id);});
 app.put("/api/projects/:id/fusion-link", async request=>{const {id}=request.params as {id:string};linkFusionProject(id,(request.body??{}) as {hubId?:string;fusionProjectId?:string;designId?:string});return getFusionLink(id);});
