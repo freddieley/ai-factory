@@ -1,11 +1,13 @@
 import { config } from "./config.js";
 import { providerInfo, getClient } from "./providers.js";
 import { fusion } from "./fusion.js";
+import { getSchemaVersion } from "./db.js";
 
 async function main() {
   console.log("AI Factory doctor");
   console.log("-----------------");
   console.log("Provider:", providerInfo());
+  console.log("Database schema version:", getSchemaVersion());
 
   if (config.AI_PROVIDER === "local") {
     try {
