@@ -43,11 +43,11 @@ export function createBoxScript({ widthMm, depthMm, heightMm }: CreateBoxArgs): 
 
 function parseToolText(result: unknown): CadResult {
   const text = JSON.stringify(result);
-  const body = text.match(/bodies=(\\d+)/)?.[1];
+  const body = text.match(/bodies=(\d+)/)?.[1];
   const width = text.match(/width_mm=([0-9.eE+-]+)/)?.[1];
   const depth = text.match(/depth_mm=([0-9.eE+-]+)/)?.[1];
   const height = text.match(/height_mm=([0-9.eE+-]+)/)?.[1];
-  const document = text.match(/document=([^\\"}]+)/)?.[1];
+  const document = text.match(/document=([^\"}]+)/)?.[1];
 
   if (!width || !depth || !height) {
     return { success: false, operation: "create_box", error: `Fusion did not return verification dimensions: ${text}` };
