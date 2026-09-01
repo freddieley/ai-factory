@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { transformPoint, type Point3, type Transform } from "./geometry.js";
 import { type ParametricModel, resolveLength } from "./parametric.js";
-import { type AssemblyModel, validateAssembly } from "./assembly.js";
+import { validateAssembly } from "./assembly.js";
 
 const finite = z.number().finite();
 const nonNegative = finite.nonnegative();
@@ -84,7 +84,6 @@ export type MechanicalFinding = {
   partId?: string;
   machineId?: string;
   fitId?: string;
-  datumId?: string;
 };
 
 function dot(a: readonly number[], b: readonly number[]) {
@@ -150,7 +149,7 @@ export function analyzeFits(inputs: unknown): FitAnalysis[] {
   return z.array(FitSpec).parse(inputs).map(analyzeFit).sort((a, b) => a.id.localeCompare(b.id));
 }
 
-export function checkMachineCapability(part: { id: string; process?: string; material?: { material: string }; model: string }, model: ParametricModel | undefined, capability: MachineCapability): MechanicalFinding[] {
+export function checkMachineCapability(part: { id: string; process?: string; material?: { material: string } }, model: ParametricModel | undefined, capability: MachineCapability): MechanicalFinding[] {
   if (part.process !== capability.process) return [];
   const findings: MechanicalFinding[] = [];
   if (!capability.materials.includes(part.material?.material ?? "")) findings.push({ severity: "error", code: "MACHINE_MATERIAL_UNSUPPORTED", message: `Machine ${capability.machineId} does not declare support for material ${part.material?.material ?? "unknown"}.`, evidenceIds: capability.evidenceIds, partId: part.id, machineId: capability.machineId });
