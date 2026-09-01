@@ -9,7 +9,7 @@ This is the execution queue for the factory. Work is complete only when implemen
 - [x] Evidence source registry with attribution, confidence, timestamps, expiry, and content hashes.
 - [x] Evidence claim registry with project isolation and freshness-aware retrieval.
 - [x] BOM and component lifecycle management — versioned project BOMs, component references, single approved revision, lifecycle history and evidence linkage.
-- [ ] Supplier/component discovery with availability, cost, lead-time, and approved-source records.
+- [x] Supplier/component discovery — project-scoped suppliers, observed offers, availability/cost/lead-time data, provenance, freshness, procurement ranking, and explicit approved-source records.
 - [ ] Change impact analysis and design review gates.
 
 ## Phase 2 — Autonomous CAD and mechanical design
