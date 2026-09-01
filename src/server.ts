@@ -1,6 +1,7 @@
 import { app } from "./api.js";
 import { registerDesignSpaceRoutes } from "./design-space-routes.js";
 import { registerElectronicsRoutes } from "./electronics-routes.js";
+import { registerElectronicsSelectionRoutes } from "./electronics-selection-routes.js";
 import { registerKiCadRoutes } from "./kicad-routes.js";
 import { readFile } from "node:fs/promises";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -10,6 +11,7 @@ export { app } from "./api.js";
 
 registerDesignSpaceRoutes(app);
 registerElectronicsRoutes(app);
+registerElectronicsSelectionRoutes(app);
 registerKiCadRoutes(app);
 
 const publicRoot = fileURLToPath(new URL("../public/", import.meta.url));
