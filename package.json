@@ -8,7 +8,7 @@
     "dev": "tsx src/server.ts",
     "start": "node dist/server.js",
     "build": "tsc -p tsconfig.json",
-    "test": "vitest run",
+    "test": "vitest run --fileParallelism=false",
     "typecheck": "tsc --noEmit",
     "doctor": "tsx src/doctor.ts",
     "audit": "npm audit --audit-level=high",
