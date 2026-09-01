@@ -1,5 +1,6 @@
 import { app } from "./api.js";
 import { registerDesignSpaceRoutes } from "./design-space-routes.js";
+import { registerElectronicsRoutes } from "./electronics-routes.js";
 import { readFile } from "node:fs/promises";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { config } from "./config.js";
@@ -7,6 +8,7 @@ import { config } from "./config.js";
 export { app } from "./api.js";
 
 registerDesignSpaceRoutes(app);
+registerElectronicsRoutes(app);
 
 const publicRoot = fileURLToPath(new URL("../public/", import.meta.url));
 
@@ -48,4 +50,4 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
       app.log.error(error);
       process.exit(1);
     });
-}
+} 
