@@ -40,21 +40,19 @@ Simulation → Manufacturing → Physical Test → Iteration
 - Persistent projects, runs, factory cycles, events, requirements, artifacts, lineage, approvals, plans, work orders, and lifecycle stages.
 - First-class cycle/run/event lineage with cycle and run APIs.
 - Approval gates for manufacturing, physical testing, and release.
-- Browser console, JSON API, diagnostics, reproducible npm installs, CI quality checks, and automated contract tests.
+- Browser console, JSON API, structured Fastify request logging, diagnostics, reproducible npm installs, CI quality checks, and automated contract tests.
 
 ## Local development
 
 ```bash
-npm install
+npm ci
 cp .env.example .env
-npm run typecheck
-npm test
-npm run build
+npm run verify
 npm run doctor
 npm run dev
 ```
 
-The server defaults to `http://127.0.0.1:3000`.
+`npm run verify` runs typechecking, tests, a production build, and the high-severity dependency audit. The server defaults to `http://127.0.0.1:3000`.
 
 ### Local model
 
@@ -76,6 +74,8 @@ The model is replaceable through `.env`; the factory's planning and execution co
 
 The integration discovers the MCP tool set at runtime instead of assuming a fixed list.
 
+See [`docs/OPERATIONS.md`](./docs/OPERATIONS.md) for database migration, troubleshooting, observability, and local-operation procedures.
+
 ## Safety boundary
 
 This project targets benign civilian engineering and robotics. Autonomous software must not silently initiate irreversible physical operations. Manufacturing, physical testing, and release remain approval-gated until the factory has an appropriate authorization, interlock, monitoring, and emergency-stop architecture. Simulation and deterministic verification should precede physical execution whenever practical.
@@ -92,7 +92,7 @@ This project targets benign civilian engineering and robotics. Autonomous softwa
 - [x] Schema-versioned database migrations and migration tests.
 - [x] Repository-wide API contract/integration coverage for the current API surface.
 - [x] Explicit factory-cycle, run, event, and artifact lineage semantics with cycle APIs.
-- [x] Structured Fastify logging, correlation IDs, failure handling, and machine-readable diagnostics baseline.
+- [x] Structured Fastify request logging, bounded failure handling, and machine-readable diagnostics baseline.
 - [x] Reproducible `npm ci` CI, dependency auditing, and automated quality checks.
 - [x] `.env.example`, operational setup, migration, and troubleshooting guidance aligned with runtime configuration.
 
