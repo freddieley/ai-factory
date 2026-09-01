@@ -7,7 +7,7 @@ export type ExecutionBudget = {
 };
 
 export const DEFAULT_EXECUTION_BUDGET: ExecutionBudget = {
-  maxModelCalls: 4,
+  maxModelCalls: 6,
   maxToolCalls: 30,
   maxWallMs: 120_000
 };
