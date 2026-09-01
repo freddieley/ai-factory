@@ -16,7 +16,7 @@ const schema = z.object({
   MAX_TOOL_CALLS: z.coerce.number().int().min(1).max(100).default(30),
   MAX_RUN_MS: z.coerce.number().int().min(5_000).max(600_000).default(120_000),
   MODEL_TIMEOUT_MS: z.coerce.number().int().min(1_000).max(120_000).default(60_000),
-  TOOL_TIMEOUT_MS: z.coerce.number().int().min(1_000).max(120_000).default(15_000),
+  TOOL_TIMEOUT_MS: z.coerce.number().int().min(1_000).max(120_000).default(30_000),
   TEMPERATURE: z.coerce.number().min(0).max(2).default(0.2),
   PORT: z.coerce.number().int().default(3000),
   HOST: z.string().default("127.0.0.1"),
