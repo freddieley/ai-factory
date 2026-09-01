@@ -2,7 +2,7 @@
 
 This is the execution queue for the factory. Work is complete only when implementation, tests, migrations, diagnostics, documentation, and operational behavior agree.
 
-## Phase 1 — Engineering knowledge and digital thread
+## Phase 1 — Engineering knowledge and digital thread **[complete]**
 - [x] Versioned requirements, decisions, assumptions, constraints, and acceptance criteria.
 - [x] First-class artifact/revision graph connecting engineering artifacts through explicit lineage and revision history.
 - [x] Engineering knowledge base with units, tolerances, materials, components, standards, manufacturing constraints, and provenance fields.
@@ -10,10 +10,10 @@ This is the execution queue for the factory. Work is complete only when implemen
 - [x] Evidence claim registry with project isolation and freshness-aware retrieval.
 - [x] BOM and component lifecycle management — versioned project BOMs, component references, single approved revision, lifecycle history and evidence linkage.
 - [x] Supplier/component discovery — project-scoped suppliers, observed offers, availability/cost/lead-time data, provenance, freshness, procurement ranking, and explicit approved-source records.
-- [ ] Change impact analysis and design review gates.
+- [x] Change impact analysis and design review gates — downstream artifact traversal, requirement/artifact traceability, persistent impact analyses, blocking findings, and deterministic approval decisions.
 
-## Phase 2 — Autonomous CAD and mechanical design
-- [ ] Parametric design representation independent of a single CAD vendor.
+## Phase 2 — Autonomous CAD and mechanical design **[current]**
+- [x] Parametric design representation independent of a single CAD vendor — canonical metric model, named dimensional parameters, vendor-neutral mechanical features, validation, and deterministic serialization.
 - [ ] CAD state snapshots, diffs, revisions, rollback, and deterministic replay.
 - [ ] Multi-part assemblies, joints, fasteners, tolerances, materials, and manufacturability checks.
 - [ ] Automated drawing/document generation.
