@@ -8,6 +8,7 @@ export const FactoryRequest=z.object({projectId:z.string().min(1),objective:z.st
 export type FactoryRequest=z.infer<typeof FactoryRequest>;
 export const FactoryFollowUpRequest=z.object({cycleId:z.string().min(1),message:z.string().min(1)});
 export type FactoryFollowUpRequest=z.infer<typeof FactoryFollowUpRequest>;
+export type FactoryCycleHooks={onCycleCreated?:(cycleId:string)=>void};
 type EventRow={type:string;payload:string};
 function hasVerifiedToolResult(events:EventRow[]){return events.some(event=>{if(event.type!=="tool.result")return false;try{const payload=JSON.parse(event.payload) as {result?:{success?:boolean}};return payload.result?.success===true;}catch{return false;}});}
 function hasUnresolvedCondition(output:string){return /not verified|unable to|failed|error|unmet|cannot|blocked|needs review/i.test(output);}
@@ -16,8 +17,8 @@ function parseConstraints(value:unknown):string[]{if(Array.isArray(value))return
 function conversationContext(cycleId:string){return listCycleEvents(cycleId).filter((event)=>["factory.conversation.user","factory.conversation.assistant"].includes(event.type)).map((event)=>{let payload:{message?:string};try{payload=JSON.parse(event.payload) as {message?:string};}catch{return null;}return payload.message?`${event.type.endsWith("user")?"User":"AI Factory"}: ${payload.message}`:null;}).filter((item):item is string=>Boolean(item)).join("\n\n");}
 
 /** Run a bounded plan-first engineering cycle with a durable cycle identity. */
-export async function runFactory(request:FactoryRequest){
-  const normalized=FactoryRequest.parse(request);const cycleId=createFactoryCycle(normalized.projectId,normalized.objective,normalized.constraints);const results:unknown[]=[];initializeProjectStages(normalized.projectId);
+export async function runFactory(request:FactoryRequest,hooks:FactoryCycleHooks={}){
+  const normalized=FactoryRequest.parse(request);const cycleId=createFactoryCycle(normalized.projectId,normalized.objective,normalized.constraints);hooks.onCycleCreated?.(cycleId);const results:unknown[]=[];initializeProjectStages(normalized.projectId);
   addCycleEvent(cycleId,"factory.cycle.started",{objective:normalized.objective,constraints:normalized.constraints,maxIterations:normalized.maxIterations});
   addCycleEvent(cycleId,"factory.conversation.user",{message:normalized.objective});
   try{
