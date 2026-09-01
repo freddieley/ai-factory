@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { createArtifact, getArtifact, listArtifactRevisions } from "./db.js";
+import { appendArtifactRevision, createArtifact, getArtifact, listArtifactRevisions } from "./db.js";
 import { ParametricModel, canonicalParametricJson, validateParametricModel } from "./parametric.js";
 
 export type CadState = {
@@ -60,6 +60,12 @@ export function recordCadSnapshot(projectId: string, state: CadState, runId?: st
   return { ...snapshot, artifactId };
 }
 
+export function appendCadSnapshot(artifactId: string, state: CadState, runId?: string): CadSnapshot & { artifactId: string; revision: number } {
+  const snapshot = snapshotCadState(state);
+  const revision = appendArtifactRevision(artifactId, "cad_snapshot", snapshot, snapshot.contentHash, undefined, runId);
+  return { ...snapshot, artifactId, revision };
+}
+
 export function restoreCadSnapshot(artifactId: string): CadSnapshot {
   const artifact = getArtifact(artifactId) as { kind: string; content_hash?: string; metadata: string } | undefined;
   if (!artifact || artifact.kind !== "cad_snapshot") throw new Error("CAD snapshot artifact not found");
@@ -71,11 +77,12 @@ export function restoreCadSnapshot(artifactId: string): CadSnapshot {
 
 export function replayCadHistory(artifactId: string): CadSnapshot[] {
   const revisions = listArtifactRevisions(artifactId) as Array<{ metadata: string; content_hash?: string | null; source_kind?: string | null }>;
-  if (!revisions.length) throw new Error("CAD artifact has no revisions");
-  return revisions.filter(revision => revision.source_kind === "cad_snapshot" || revision.metadata).map(revision => {
+  const snapshots = revisions.filter(revision => revision.source_kind === "cad_snapshot").map(revision => {
     const metadata = JSON.parse(revision.metadata) as CadSnapshot;
     const snapshot = snapshotCadState(metadata.state);
     if (revision.content_hash && revision.content_hash !== snapshot.contentHash) throw new Error("CAD revision content hash mismatch");
     return snapshot;
   });
+  if (!snapshots.length) throw new Error("CAD artifact has no snapshot revisions");
+  return snapshots;
 }
