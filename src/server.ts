@@ -11,9 +11,15 @@ async function readPublicFile(filename: string) {
   return readFile(`${publicRoot}${filename}`);
 }
 
-// Keep browser assets on explicit Fastify routes. The API module owns GET /.
-// This avoids duplicate route registration while keeping /app.js and
-// /styles.css isolated from API routing and HTML fallbacks.
+app.get("/", async (_request, reply) => {
+  try {
+    const content = await readPublicFile("index.html");
+    return reply.type("text/html; charset=utf-8").header("cache-control", "no-store").send(content);
+  } catch {
+    return reply.code(404).send({ error: "operator console not found" });
+  }
+});
+
 app.get("/app.js", async (_request, reply) => {
   try {
     const content = await readPublicFile("app.js");
