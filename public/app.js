@@ -1,15 +1,15 @@
-let projectId = "";
-let cycleId = "";
-let running = false;
-let jsonEvents = [];
+var projectId = "";
+var cycleId = "";
+var running = false;
+var jsonEvents = [];
 
-const $ = id => document.getElementById(id);
+function $(id) { return document.getElementById(id); }
 
 function addMessage(role, text) {
   if (!text) return;
-  const wrap = document.createElement("div");
-  wrap.className = `message ${role}`;
-  const bubble = document.createElement("div");
+  var wrap = document.createElement("div");
+  wrap.className = "message " + role;
+  var bubble = document.createElement("div");
   bubble.className = "bubble";
   bubble.textContent = text;
   wrap.appendChild(bubble);
@@ -17,13 +17,10 @@ function addMessage(role, text) {
   $("messages").scrollTop = $("messages").scrollHeight;
 }
 
-function setStatus(text, working = false) {
-  $("status").textContent = "";
-  const label = document.createElement("span");
-  label.textContent = text;
-  $("status").appendChild(label);
+function setStatus(text, working) {
+  $("status").textContent = text;
   if (working) {
-    const dots = document.createElement("span");
+    var dots = document.createElement("span");
     dots.className = "typing";
     dots.innerHTML = "<i></i><i></i><i></i>";
     $("status").appendChild(dots);
@@ -31,143 +28,129 @@ function setStatus(text, working = false) {
 }
 
 function renderJson() {
-  $("json").textContent = jsonEvents.length
-    ? JSON.stringify(jsonEvents, null, 2)
-    : "Events will appear here as the cycle runs.";
+  $("json").textContent = jsonEvents.length ? JSON.stringify(jsonEvents, null, 2) : "Events will appear here as the cycle runs.";
 }
 
-async function createProject() {
-  const response = await fetch("/api/projects", {
+function readError(response) {
+  return response.json().then(function (payload) {
+    return payload && payload.error ? payload.error : response.statusText;
+  }).catch(function () { return response.statusText; });
+}
+
+function createProject() {
+  return fetch("/api/projects", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({
-      name: $("name").value.trim(),
-      description: $("description").value.trim()
-    })
-  });
-  const project = await response.json();
-  if (!response.ok || project.error) {
-    addMessage("assistant", `I couldn't create the project: ${project.error || response.statusText}`);
+    body: JSON.stringify({ name: $("name").value.trim(), description: $("description").value.trim() })
+  }).then(function (response) {
+    if (!response.ok) return readError(response).then(function (message) { addMessage("assistant", "I could not create the project: " + message); return null; });
+    return response.json().then(function (project) {
+      projectId = project.id;
+      $("project-state").textContent = "Project ready: " + projectId.slice(0, 8);
+      return project;
+    });
+  }).catch(function (error) {
+    addMessage("assistant", "I could not create the project: " + error.message);
     return null;
-  }
-  projectId = project.id;
-  $("project-state").textContent = `Project ready: ${projectId.slice(0, 8)}`;
-  return project;
+  });
 }
 
-async function sendMessage(event) {
+function sendMessage(event) {
   event.preventDefault();
   if (running) return;
-  const text = $("prompt").value.trim();
+  var text = $("prompt").value.trim();
   if (!text) return;
 
-  if (!projectId && !(await createProject())) return;
+  var projectPromise = projectId ? Promise.resolve({ id: projectId }) : createProject();
+  projectPromise.then(function (project) {
+    if (!project) return;
+    $("prompt").value = "";
+    addMessage("user", text);
+    running = true;
+    $("send").disabled = true;
+    setStatus("Working", true);
 
-  $("prompt").value = "";
-  addMessage("user", text);
-  running = true;
-  $("send").disabled = true;
-  setStatus("Working", true);
+    var endpoint = cycleId ? "/api/cycles/" + encodeURIComponent(cycleId) + "/continue/stream" : "/api/factory/run/stream";
+    var body = cycleId ? { message: text } : { projectId: projectId, objective: text, constraints: [], maxIterations: 2 };
 
-  try {
-    const endpoint = cycleId
-      ? `/api/cycles/${encodeURIComponent(cycleId)}/continue/stream`
-      : "/api/factory/run/stream";
-    const body = cycleId
-      ? { message: text }
-      : { projectId, objective: text, constraints: [], maxIterations: 2 };
-
-    const response = await fetch(endpoint, {
+    return fetch(endpoint, {
       method: "POST",
       headers: { "content-type": "application/json", accept: "text/event-stream" },
       body: JSON.stringify(body)
+    }).then(function (response) {
+      if (!response.ok) return readError(response).then(function (message) { throw new Error(message); });
+      jsonEvents = [];
+      renderJson();
+      return consumeSse(response);
+    }).catch(function (error) {
+      addMessage("assistant", "The cycle could not be completed. " + error.message);
+      setStatus("Failed", false);
+    }).then(function () {
+      running = false;
+      $("send").disabled = false;
+      $("prompt").focus();
     });
-
-    if (!response.ok) {
-      let message = response.statusText;
-      try {
-        const payload = await response.json();
-        message = payload.error || message;
-      } catch {}
-      throw new Error(message);
-    }
-
-    jsonEvents = [];
-    renderJson();
-    await consumeSse(response);
-  } catch (error) {
-    addMessage("assistant", `The cycle could not be completed. ${error.message}`);
-    setStatus("Failed");
-  } finally {
-    running = false;
-    $("send").disabled = false;
-    $("prompt").focus();
-  }
+  });
 }
 
-async function consumeSse(response) {
-  if (!response.body) throw new Error("Streaming is not available in this browser.");
-  const reader = response.body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = "";
-
-  while (true) {
-    const { value, done } = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, { stream: true });
-    const frames = buffer.split("\n\n");
-    buffer = frames.pop() || "";
-    for (const frame of frames) handleSse(frame);
+function consumeSse(response) {
+  if (!response.body) return Promise.reject(new Error("Streaming is not available in this browser."));
+  var reader = response.body.getReader();
+  var decoder = new TextDecoder();
+  var buffer = "";
+  function readNext() {
+    return reader.read().then(function (result) {
+      if (result.done) {
+        buffer += decoder.decode();
+        if (buffer.trim()) handleSse(buffer);
+        return;
+      }
+      buffer += decoder.decode(result.value, { stream: true });
+      var frames = buffer.split("\n\n");
+      buffer = frames.pop() || "";
+      frames.forEach(handleSse);
+      return readNext();
+    });
   }
-
-  buffer += decoder.decode();
-  if (buffer.trim()) handleSse(buffer);
+  return readNext();
 }
 
 function handleSse(frame) {
-  const lines = frame.split("\n");
-  const eventLine = lines.find(line => line.startsWith("event:"));
-  const dataLine = lines.find(line => line.startsWith("data:"));
+  var lines = frame.split("\n");
+  var eventLine = lines.find(function (line) { return line.indexOf("event:") === 0; });
+  var dataLine = lines.find(function (line) { return line.indexOf("data:") === 0; });
   if (!dataLine) return;
+  var eventName = (eventLine || "event: message").slice(6).trim();
+  var data;
+  try { data = JSON.parse(dataLine.slice(5).trim()); } catch (_) { return; }
 
-  const event = (eventLine || "event: message").slice(6).trim();
-  let data;
-  try {
-    data = JSON.parse(dataLine.slice(5).trim());
-  } catch {
-    return;
-  }
-
-  if (event === "cycle") {
+  if (eventName === "cycle") {
     cycleId = data.cycleId;
-    $("cycle").textContent = `Cycle ${cycleId.slice(0, 8)}`;
+    $("cycle").textContent = "Cycle " + cycleId.slice(0, 8);
     return;
   }
-
-  if (event === "json") {
+  if (eventName === "json") {
     jsonEvents.push(data);
     renderJson();
     return;
   }
-
-  if (event === "message") {
+  if (eventName === "message") {
     addMessage(data.role === "user" ? "user" : "assistant", data.text);
     return;
   }
-
-  if (event === "complete") {
-    const status = data.result?.status || "finished";
-    setStatus(`Cycle ${status}`);
+  if (eventName === "complete") {
+    var status = data.result && data.result.status ? data.result.status : "finished";
+    setStatus("Cycle " + status, false);
     loadPlan();
   }
 }
 
-async function loadPlan() {
-  if (!projectId) return;
-  const response = await fetch(`/api/projects/${encodeURIComponent(projectId)}/plan`).catch(() => null);
-  if (!response?.ok) return;
-  const plan = await response.json();
-  $("plan").textContent = JSON.stringify(plan, null, 2);
+function loadPlan() {
+  if (!projectId) return Promise.resolve();
+  return fetch("/api/projects/" + encodeURIComponent(projectId) + "/plan")
+    .then(function (response) { return response.ok ? response.json() : null; })
+    .then(function (plan) { if (plan) $("plan").textContent = JSON.stringify(plan, null, 2); })
+    .catch(function () {});
 }
 
 function newCycle() {
@@ -177,18 +160,18 @@ function newCycle() {
   $("cycle").textContent = "No active cycle";
   $("messages").innerHTML = "";
   addMessage("assistant", "New cycle ready. What should we build or investigate?");
-  setStatus("Ready");
+  setStatus("Ready", false);
   $("prompt").focus();
 }
 
 $("composer").addEventListener("submit", sendMessage);
 $("create-project").addEventListener("click", createProject);
 $("new-cycle").addEventListener("click", newCycle);
-$("prompt").addEventListener("keydown", event => {
+$("prompt").addEventListener("keydown", function (event) {
   if (event.key === "Enter" && !event.shiftKey) {
     event.preventDefault();
     $("composer").requestSubmit();
   }
 });
 
-fetch("/api/health").catch(() => setStatus("Backend unavailable"));
+fetch("/api/health").catch(function () { setStatus("Backend unavailable", false); });
