@@ -90,6 +90,8 @@ function ensureColumn(table: string, column: string, definition: string) {
 // were created before requirements/artifacts became durable entities, so
 // CREATE TABLE IF NOT EXISTS alone is not sufficient when a developer upgrades.
 ensureColumn("requirements", "source", "TEXT NOT NULL DEFAULT 'unknown'");
+ensureColumn("requirements", "key", "TEXT NOT NULL DEFAULT ''");
+ensureColumn("requirements", "value", "TEXT NOT NULL DEFAULT ''");
 ensureColumn("requirements", "unit", "TEXT");
 ensureColumn("requirements", "required", "INTEGER NOT NULL DEFAULT 1");
 ensureColumn("requirements", "status", "TEXT NOT NULL DEFAULT 'unverified'");
