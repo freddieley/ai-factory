@@ -4,7 +4,7 @@ import { addEvent, finishRun, createRun } from "./db.js";
 import { fusion } from "./fusion.js";
 import { getClient, providerInfo } from "./providers.js";
 import { ExecutionController, withTimeout } from "./execution.js";
-import { executeCreateBox } from "./cad.js";
+import { executeCreateBox, executeCreateCylinder } from "./cad.js";
 
 const SYSTEM = `
 You are AI Factory, a fast, disciplined engineering agent for civilian robotics and CAD work.
@@ -13,10 +13,10 @@ Your job is to help users design, analyze, document, and prepare benign engineer
 
 Execution rules:
 - Prefer the smallest number of tool calls that can establish the requested result.
-- For simple deterministic rectangular geometry, use the local ai_factory_create_box tool instead of writing Fusion Python yourself.
+- For simple deterministic primitive geometry, use a local ai_factory_* tool instead of writing Fusion Python yourself.
 - For a request to create a new Fusion design, do NOT search recent documents first.
 - Prefer ONE deterministic CAD tool call for simple geometry, because it creates and verifies the result in one operation.
-- Use fusion_mcp_read for inspection and verification when the deterministic tool does not already return sufficient verification data.
+- Use fusion_mcp_read for inspection and verification when a deterministic tool does not already return sufficient verification data.
 - Never claim a Fusion operation succeeded unless its result confirms it.
 - If a Fusion tool returns an error, diagnose that exact error before retrying. Do not repeat or guess with unrelated API methods.
 - Do not retry an identical tool call after it has failed unless the arguments or diagnosis changed.
@@ -25,12 +25,21 @@ Execution rules:
 - For fabrication, produce a proposal/approval request rather than silently starting a machine.
 - When you have enough evidence, answer the user directly. Do not call another tool merely to make the report prettier.
 
+Deterministic CAD tools:
+- ai_factory_create_box: rectangular solid with widthMm, depthMm, heightMm.
+- ai_factory_create_cylinder: cylindrical solid with radiusMm and heightMm.
+- Both create a new Fusion design and return verified solid-body and bounding-box dimensions.
+- Use create_box for plates, blocks, rectangular housings, and other cuboids.
+- Use create_cylinder for shafts, pins, posts, spacers, and other simple cylindrical solids.
+- Do not use a generic Fusion Python script when one of these deterministic tools directly satisfies the request.
+
 Fusion Python API facts:
 - Get the application with adsk.core.Application.get().
 - Autodesk's supported new-design workflow is app.documents.add(adsk.core.DocumentTypes.FusionDesignDocumentType), followed by adsk.fusion.Design.cast(app.activeProduct).
 - Get the root component with design.rootComponent.
 - Add a sketch with rootComp.sketches.add(rootComp.xYConstructionPlane) or another construction plane.
 - Create a rectangle with sketch.sketchCurves.sketchLines.addTwoPointRectangle(...).
+- Create a circle with sketch.sketchCurves.sketchCircles.addByCenterRadius(...).
 - Get the profile with sketch.profiles.item(0).
 - Create an extrusion with rootComp.features.extrudeFeatures.createInput(...), setDistanceExtent(...), then extrudes.add(...).
 - Do NOT use adsk.fusion.Design.get(), adsk.fusion.Design.create(), createSketchOn(), or createExtrude().
@@ -60,6 +69,22 @@ const LOCAL_CAD_TOOLS: OpenAI.Chat.Completions.ChatCompletionTool[] = [
           heightMm: { type: "number", description: "Height in millimetres." }
         },
         required: ["widthMm", "depthMm", "heightMm"]
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "ai_factory_create_cylinder",
+      description: "Create and verify a cylindrical solid in a new Fusion design. Use for simple shafts, pins, posts, spacers, and cylinders.",
+      parameters: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          radiusMm: { type: "number", description: "Radius in millimetres." },
+          heightMm: { type: "number", description: "Height in millimetres." }
+        },
+        required: ["radiusMm", "heightMm"]
       }
     }
   }
@@ -188,6 +213,8 @@ export async function runAgent(projectId: string, prompt: string) {
           let result: unknown;
           if (rawName === "ai_factory_create_box") {
             result = await executeCreateBox(args);
+          } else if (rawName === "ai_factory_create_cylinder") {
+            result = await executeCreateCylinder(args);
           } else {
             if (!rawName.startsWith("fusion__")) {
               result = { error: "Unknown tool namespace." };
