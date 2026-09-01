@@ -6,6 +6,7 @@ import { registerEngineeringRecordRoutes } from "./engineering-record-routes.js"
 import { registerEvidenceRoutes } from "./evidence-routes.js";
 import { registerBomRoutes } from "./bom-routes.js";
 import { registerSupplierRoutes } from "./supplier-routes.js";
+import { registerDesignReviewRoutes } from "./design-review-routes.js";
 
 export async function registerLifecycleRoutes(app: FastifyInstance) {
   app.get("/api/projects/:id/stages", async (request, reply) => { const { id }=request.params as {id:string}; if(!getProject(id))return reply.code(404).send({error:"project not found"}); const stages=listProjectStages(id); if(stages.length===0)initializeProjectStages(id); return listProjectStages(id); });
@@ -16,4 +17,5 @@ export async function registerLifecycleRoutes(app: FastifyInstance) {
   await registerEvidenceRoutes(app);
   await registerBomRoutes(app);
   await registerSupplierRoutes(app);
+  await registerDesignReviewRoutes(app);
 }
