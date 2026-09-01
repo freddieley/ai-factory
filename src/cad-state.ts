@@ -66,6 +66,14 @@ export function appendCadSnapshot(artifactId: string, state: CadState, runId?: s
   return { ...snapshot, artifactId, revision };
 }
 
+function snapshotFromRevision(revision: { metadata: string; content_hash?: string | null }): CadSnapshot {
+  const metadata = JSON.parse(revision.metadata) as CadSnapshot;
+  if (metadata.schema !== "ai-factory.cad-snapshot/v1") throw new Error("Invalid CAD snapshot schema");
+  const snapshot = snapshotCadState(metadata.state);
+  if (revision.content_hash && revision.content_hash !== snapshot.contentHash) throw new Error("CAD revision content hash mismatch");
+  return snapshot;
+}
+
 export function restoreCadSnapshot(artifactId: string): CadSnapshot {
   const artifact = getArtifact(artifactId) as { kind: string; content_hash?: string; metadata: string } | undefined;
   if (!artifact || artifact.kind !== "cad_snapshot") throw new Error("CAD snapshot artifact not found");
@@ -77,12 +85,31 @@ export function restoreCadSnapshot(artifactId: string): CadSnapshot {
 
 export function replayCadHistory(artifactId: string): CadSnapshot[] {
   const revisions = listArtifactRevisions(artifactId) as Array<{ metadata: string; content_hash?: string | null; source_kind?: string | null }>;
-  const snapshots = revisions.filter(revision => revision.source_kind === "cad_snapshot").map(revision => {
-    const metadata = JSON.parse(revision.metadata) as CadSnapshot;
-    const snapshot = snapshotCadState(metadata.state);
-    if (revision.content_hash && revision.content_hash !== snapshot.contentHash) throw new Error("CAD revision content hash mismatch");
-    return snapshot;
-  });
+  const snapshots = revisions.filter(revision => revision.source_kind === "cad_snapshot").map(snapshotFromRevision);
   if (!snapshots.length) throw new Error("CAD artifact has no snapshot revisions");
   return snapshots;
+}
+
+/**
+ * Restores a historical design by appending an immutable new revision whose
+ * payload exactly matches the selected historical revision. Existing history
+ * is never mutated, so rollback is itself auditable and replayable.
+ */
+export function rollbackCadSnapshot(artifactId: string, targetRevision: number, runId?: string): CadSnapshot & { artifactId: string; revision: number; rolledBackToRevision: number } {
+  if (!Number.isInteger(targetRevision) || targetRevision < 1) throw new Error("target revision must be a positive integer");
+  const history = replayCadHistory(artifactId);
+  if (targetRevision > history.length) throw new Error(`CAD revision ${targetRevision} not found`);
+  const target = history[targetRevision - 1];
+  if (!target) throw new Error(`CAD revision ${targetRevision} not found`);
+  const appended = appendCadSnapshot(artifactId, target.state, runId);
+  return { ...appended, rolledBackToRevision: targetRevision };
+}
+
+export function diffCadRevisions(artifactId: string, beforeRevision: number, afterRevision: number): CadDiff {
+  if (!Number.isInteger(beforeRevision) || beforeRevision < 1 || !Number.isInteger(afterRevision) || afterRevision < 1) throw new Error("revision numbers must be positive integers");
+  const history = replayCadHistory(artifactId);
+  const before = history[beforeRevision - 1];
+  const after = history[afterRevision - 1];
+  if (!before || !after) throw new Error("CAD revision not found");
+  return diffCadStates(before.state, after.state);
 }
