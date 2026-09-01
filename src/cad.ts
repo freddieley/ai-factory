@@ -22,9 +22,17 @@ export type CreateMountingPlateArgs = {
   insetMm: number;
 };
 
+export type CreateEnclosureArgs = {
+  widthMm: number;
+  depthMm: number;
+  baseHeightMm: number;
+  wallHeightMm: number;
+  wallThicknessMm: number;
+};
+
 export type CadResult = {
   success: boolean;
-  operation: "create_box" | "create_cylinder" | "create_mounting_plate";
+  operation: "create_box" | "create_cylinder" | "create_mounting_plate" | "create_enclosure";
   dimensionsMm?: { width: number; depth: number; height: number };
   radiusMm?: number;
   bodies?: number;
@@ -63,6 +71,20 @@ export function parseCreateMountingPlateArgs(args: Record<string, unknown>): Cre
   return parsed;
 }
 
+export function parseCreateEnclosureArgs(args: Record<string, unknown>): CreateEnclosureArgs {
+  const parsed = {
+    widthMm: finitePositive(args.widthMm, "widthMm"),
+    depthMm: finitePositive(args.depthMm, "depthMm"),
+    baseHeightMm: finitePositive(args.baseHeightMm, "baseHeightMm"),
+    wallHeightMm: finitePositive(args.wallHeightMm, "wallHeightMm"),
+    wallThicknessMm: finitePositive(args.wallThicknessMm, "wallThicknessMm")
+  };
+  if (parsed.wallThicknessMm * 2 >= parsed.widthMm || parsed.wallThicknessMm * 2 >= parsed.depthMm) {
+    throw new Error("wallThicknessMm leaves no usable interior space.");
+  }
+  return parsed;
+}
+
 function createDesignPreamble(): string {
   return `import adsk.core, adsk.fusion\n\napp = adsk.core.Application.get()\nif not app:\n    raise RuntimeError("Fusion application unavailable")\n\ndoc = app.documents.add(adsk.core.DocumentTypes.FusionDesignDocumentType)\nproduct = app.activeProduct\ndesign = adsk.fusion.Design.cast(product)\nif not design:\n    raise RuntimeError("Active product is not a Fusion Design")\n\nroot = design.rootComponent\n`;
 }
@@ -83,6 +105,20 @@ export function createMountingPlateScript({ widthMm, depthMm, plateHeightMm, pos
   const plate = `plateSketch = root.sketches.add(root.xYConstructionPlane)\nplateSketch.sketchCurves.sketchLines.addTwoPointRectangle(adsk.core.Point3D.create(0, 0, 0), adsk.core.Point3D.create(${w}, ${d}, 0))\nplateProfile = plateSketch.profiles.item(0)\nextrudes = root.features.extrudeFeatures\nplateInput = extrudes.createInput(plateProfile, adsk.fusion.FeatureOperations.NewBodyFeatureOperation)\nplateInput.setDistanceExtent(False, adsk.core.ValueInput.createByReal(${ph}))\nplate = extrudes.add(plateInput)\nif not plate: raise RuntimeError("Plate extrusion failed")\n`;
   const posts = points.map(([x, y], i) => `postSketch${i} = root.sketches.add(root.xYConstructionPlane)\npostSketch${i}.sketchCurves.sketchCircles.addByCenterRadius(adsk.core.Point3D.create(${x}, ${y}, 0), ${r})\npostProfile${i} = postSketch${i}.profiles.item(0)\npostInput${i} = extrudes.createInput(postProfile${i}, adsk.fusion.FeatureOperations.NewBodyFeatureOperation)\npostInput${i}.setDistanceExtent(False, adsk.core.ValueInput.createByReal(${postH}))\npost${i} = extrudes.add(postInput${i})\nif not post${i}: raise RuntimeError("Mounting post ${i + 1} extrusion failed")`).join("\n");
   return `${createDesignPreamble()}${plate}${posts}\n\nbodies = root.bRepBodies\nbodyCount = bodies.count\nif bodyCount != 5: raise RuntimeError("Expected 5 solid bodies, got " + str(bodyCount))\n\nminX = minY = minZ = 1e100\nmaxX = maxY = maxZ = -1e100\nfor i in range(bodyCount):\n    b = bodies.item(i).boundingBox\n    minX = min(minX, b.minPoint.x)\n    minY = min(minY, b.minPoint.y)\n    minZ = min(minZ, b.minPoint.z)\n    maxX = max(maxX, b.maxPoint.x)\n    maxY = max(maxY, b.maxPoint.y)\n    maxZ = max(maxZ, b.maxPoint.z)\n\nprint("AI_FACTORY_CAD_RESULT")\nprint("operation=create_mounting_plate")\nprint("bodies=" + str(bodyCount))\nprint("width_mm=" + str((maxX - minX) * 10.0))\nprint("depth_mm=" + str((maxY - minY) * 10.0))\nprint("height_mm=" + str((maxZ - minZ) * 10.0))\nprint("document=" + doc.name)\n`;
+}
+
+export function createEnclosureScript({ widthMm, depthMm, baseHeightMm, wallHeightMm, wallThicknessMm }: CreateEnclosureArgs): string {
+  const w = widthMm / 10, d = depthMm / 10, baseH = baseHeightMm / 10, wallH = wallHeightMm / 10, t = wallThicknessMm / 10;
+  const walls = [
+    { name: "front", x1: 0, y1: 0, x2: w, y2: t },
+    { name: "back", x1: 0, y1: d - t, x2: w, y2: d },
+    { name: "left", x1: 0, y1: t, x2: t, y2: d - t },
+    { name: "right", x1: w - t, y1: t, x2: w, y2: d - t }
+  ];
+  const box = (name: string, x1: number, y1: number, x2: number, y2: number, height: number) => `sketch_${name} = root.sketches.add(root.xYConstructionPlane)\nsketch_${name}.sketchCurves.sketchLines.addTwoPointRectangle(adsk.core.Point3D.create(${x1}, ${y1}, 0), adsk.core.Point3D.create(${x2}, ${y2}, 0))\nprofile_${name} = sketch_${name}.profiles.item(0)\ninput_${name} = extrudes.createInput(profile_${name}, adsk.fusion.FeatureOperations.NewBodyFeatureOperation)\ninput_${name}.setDistanceExtent(False, adsk.core.ValueInput.createByReal(${height}))\nbody_${name} = extrudes.add(input_${name})\nif not body_${name}: raise RuntimeError("${name} wall extrusion failed")\n`;
+  const base = box("base", 0, 0, w, d, baseH);
+  const wallScripts = walls.map((wall) => box(wall.name, wall.x1, wall.y1, wall.x2, wall.y2, baseH + wallH)).join("\n");
+  return `${createDesignPreamble()}extrudes = root.features.extrudeFeatures\n${base}${wallScripts}\nbodies = root.bRepBodies\nbodyCount = bodies.count\nif bodyCount != 5: raise RuntimeError("Expected 5 solid bodies, got " + str(bodyCount))\n\nminX = minY = minZ = 1e100\nmaxX = maxY = maxZ = -1e100\nfor i in range(bodyCount):\n    b = bodies.item(i).boundingBox\n    minX = min(minX, b.minPoint.x)\n    minY = min(minY, b.minPoint.y)\n    minZ = min(minZ, b.minPoint.z)\n    maxX = max(maxX, b.maxPoint.x)\n    maxY = max(maxY, b.maxPoint.y)\n    maxZ = max(maxZ, b.maxPoint.z)\n\nprint("AI_FACTORY_CAD_RESULT")\nprint("operation=create_enclosure")\nprint("bodies=" + str(bodyCount))\nprint("width_mm=" + str((maxX - minX) * 10.0))\nprint("depth_mm=" + str((maxY - minY) * 10.0))\nprint("height_mm=" + str((maxZ - minZ) * 10.0))\nprint("document=" + doc.name)\n`;
 }
 
 function parseToolText(result: unknown, operation: CadResult["operation"]): CadResult {
@@ -113,4 +149,8 @@ export async function executeCreateCylinder(args: Record<string, unknown>): Prom
 
 export async function executeCreateMountingPlate(args: Record<string, unknown>): Promise<CadResult> {
   return executeScript(createMountingPlateScript(parseCreateMountingPlateArgs(args)), "create_mounting_plate");
+}
+
+export async function executeCreateEnclosure(args: Record<string, unknown>): Promise<CadResult> {
+  return executeScript(createEnclosureScript(parseCreateEnclosureArgs(args)), "create_enclosure");
 }
