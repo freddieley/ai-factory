@@ -15,16 +15,19 @@ describe("deterministic CAD executor", () => {
     expect(() => parseCreateBoxArgs({ widthMm: 10001, depthMm: 40, heightMm: 5 })).toThrow();
   });
 
-  it("generates the supported Fusion document workflow", () => {
+  it("generates the supported active-product Fusion workflow", () => {
     const script = createBoxScript({ widthMm: 50, depthMm: 50, heightMm: 5 });
-    expect(script).toContain("app.documents.add(adsk.core.DocumentTypes.FusionDesignDocumentType)");
+    expect(script).toContain("app = adsk.core.Application.get()");
     expect(script).toContain("product = app.activeProduct");
     expect(script).toContain("design = adsk.fusion.Design.cast(product)");
-    expect(script).toContain("addTwoPointRectangle(p1, p2)");
+    expect(script).toContain("root = design.rootComponent");
+    expect(script).toContain("sketch.sketchCurves.sketchLines.addTwoPointRectangle");
     expect(script).toContain("createByReal(0.5)");
-    expect(script).toContain("extInput = extrudes.createInput(");
-    expect(script).toContain("extrudes.add(extInput)");
-    expect(script).not.toContain("exInput = extrudes.createInput(");
+    expect(script).toContain("NewBodyFeatureOperation");
+    expect(script).toContain("root.features.extrudeFeatures.add(input)");
+    expect(script).toContain("AI_FACTORY_CAD_RESULT");
+    expect(script).toContain("operation=create_box");
+    expect(script).not.toContain("app.documents.add(adsk.core.DocumentTypes.FusionDesignDocumentType)");
     expect(script).not.toContain("Design.get");
     expect(script).not.toContain("Design.create");
   });
