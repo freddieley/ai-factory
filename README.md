@@ -43,8 +43,10 @@ Simulation → Manufacturing → Physical Test → Iteration
 - Engineering knowledge records for materials, components, standards, and manufacturing constraints.
 - Evidence/provenance records with freshness metadata.
 - Versioned BOMs, component lifecycle history, supplier records, observed supplier offers, procurement ranking, and explicit approved-source records.
+- Deterministic change-impact analysis over artifact lineage and requirement links.
+- Design-review gates with blocking critical findings and unverified must-requirements.
 - Approval gates for manufacturing, physical testing, and release.
-- Browser console, JSON API, structured Fastify request logging, diagnostics, reproducible npm installs, CI quality checks, and automated contract tests.
+- Browser console, JSON API, structured Fastify request logging, bounded failure handling, machine-readable diagnostics, reproducible npm installs, CI quality checks, and automated contract tests.
 
 ## Local development
 
@@ -100,16 +102,16 @@ This project targets benign civilian engineering and robotics. Autonomous softwa
 - [x] Reproducible `npm ci` CI, dependency auditing, and automated quality checks.
 - [x] `.env.example`, operational setup, migration, and troubleshooting guidance aligned with runtime configuration.
 
-### Phase 1 — Engineering knowledge and digital thread **[current]**
+### Phase 1 — Engineering knowledge and digital thread **[complete]**
 - [x] Versioned requirements, decisions, assumptions, constraints, and acceptance criteria.
 - [x] First-class artifact/revision graph connecting engineering artifacts through explicit lineage and revision history.
 - [x] Engineering knowledge base with units, tolerances, materials, components, standards, manufacturing constraints, and provenance fields.
 - [x] Retrieval/evidence foundation with source attribution, confidence, timestamps, expiry, and content hashes.
 - [x] BOM and component lifecycle management — versioned project BOMs, component references, single approved revision, lifecycle history and evidence linkage.
 - [x] Supplier/component discovery — project-scoped suppliers, observed offers, availability/cost/lead-time data, provenance, freshness, procurement ranking, and explicit approved-source records.
-- [ ] Change impact analysis and design review gates.
+- [x] Change impact analysis and design review gates — downstream artifact traversal, requirement/artifact traceability, persistent impact analyses, blocking findings, and deterministic approval decisions.
 
-### Phase 2 — Autonomous CAD and mechanical design
+### Phase 2 — Autonomous CAD and mechanical design **[current]**
 - [ ] Parametric design representation independent of a single CAD vendor.
 - [ ] CAD state snapshots, diffs, revisions, rollback, and deterministic replay.
 - [ ] Multi-part assemblies, joints, fasteners, tolerances, materials, and manufacturability checks.
