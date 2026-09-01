@@ -23,6 +23,17 @@ describe("factory capability registry", () => {
     expect(getCapability("ai_factory_plan_parametric_box")?.domain).toBe("mechanics");
   });
 
+  it("exposes the Fusion document inspection operation instead of the obsolete queryType wrapper", () => {
+    const tool=getCapability("ai_factory_inspect_fusion");
+    expect(tool?.parameters).toMatchObject({
+      type:"object",
+      properties:{
+        operation:{type:"string",enum:["search","open","recent"]}
+      },
+      required:["operation"]
+    });
+  });
+
   it("rejects unknown capability execution before touching any external system", async () => {
     await expect(executeCapability("ai_factory_not_real", {})).rejects.toThrow("Unknown factory capability");
   });

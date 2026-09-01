@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildPlanningPrompt, parseEngineeringPlan } from "../src/planning.js";
+import { buildPlanningPrompt, parseEngineeringPlan, parsePlanningDecision } from "../src/planning.js";
 
 describe("engineering planner", () => {
   it("parses plain JSON into a validated engineering plan", () => {
@@ -22,6 +22,39 @@ describe("engineering planner", () => {
     }) + "\n```");
     expect(plan.steps[0]?.requiresApproval).toBe(true);
     expect(plan.steps[0]?.operationClass).toBe("manufacture");
+  });
+
+  it("supports an explicit clarification decision without creating a plan", () => {
+    const decision = parsePlanningDecision(JSON.stringify({
+      action: "clarify",
+      message: "What thickness should the plate be?"
+    }));
+    expect(decision.action).toBe("clarify");
+    expect(decision.plan).toBeUndefined();
+    expect(decision.message).toContain("thickness");
+  });
+
+  it("supports an explicit no-plan decision", () => {
+    const decision = parsePlanningDecision(JSON.stringify({
+      action: "none",
+      message: "Sure — what would you like to build?"
+    }));
+    expect(decision.action).toBe("none");
+    expect(decision.plan).toBeUndefined();
+  });
+
+  it("includes the current plan and recent conversation when replanning", () => {
+    const prompt = buildPlanningPrompt("Make the plate 60 mm wide instead", [], {
+      conversation: [
+        { role: "user", content: "Create a 50 mm plate" },
+        { role: "assistant", content: "I can do that." },
+        { role: "user", content: "Make the plate 60 mm wide instead" }
+      ],
+      currentPlan: { id: "PLAN-old", objective: "Create a 50 mm plate" }
+    });
+    expect(prompt).toContain("Make the plate 60 mm wide instead");
+    expect(prompt).toContain("PLAN-old");
+    expect(prompt).toContain("revise the current plan");
   });
 
   it("puts constraints directly into the planner prompt", () => {
