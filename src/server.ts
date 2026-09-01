@@ -3,6 +3,8 @@ import { readFile } from "node:fs/promises";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { config } from "./config.js";
 
+export { app } from "./api.js";
+
 const publicRoot = fileURLToPath(new URL("../public/", import.meta.url));
 
 async function sendPublicFile(reply: any, filename: string, contentType: string) {
