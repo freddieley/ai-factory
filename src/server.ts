@@ -11,18 +11,9 @@ async function readPublicFile(filename: string) {
   return readFile(`${publicRoot}${filename}`);
 }
 
-// Keep the browser application on explicit Fastify routes rather than a global
-// request hook. This makes the static asset contract unambiguous and prevents
-// an HTML fallback from ever being returned for /app.js.
-app.get("/", async (_request, reply) => {
-  try {
-    const content = await readPublicFile("index.html");
-    return reply.type("text/html; charset=utf-8").header("cache-control", "no-store").send(content);
-  } catch {
-    return reply.code(404).send({ error: "asset not found" });
-  }
-});
-
+// Keep browser assets on explicit Fastify routes. The API module owns GET /.
+// This avoids duplicate route registration while keeping /app.js and
+// /styles.css isolated from API routing and HTML fallbacks.
 app.get("/app.js", async (_request, reply) => {
   try {
     const content = await readPublicFile("app.js");
