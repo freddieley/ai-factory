@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { calculateAssemblyMassKg, canonicalAssemblyJson, checkAssemblyManufacturability, validateAssembly } from "../src/assembly.js";
+import { analyzeAssemblyClearances, calculateAssemblyMassKg, canonicalAssemblyJson, checkAssemblyManufacturability, validateAssembly } from "../src/assembly.js";
 import { createParametricBox } from "../src/parametric.js";
 
 const models = { chassis: createParametricBox("chassis", 200, 100, 5) };
@@ -43,6 +43,13 @@ describe("vendor-neutral mechanical assemblies", () => {
     const standalone = { ...base, parts: [base.parts[0]], joints: [], fasteners: [] };
     expect(calculateAssemblyMassKg(standalone, models)).toBeCloseTo(0.27, 6);
     expect(calculateAssemblyMassKg({ ...standalone, parts: [{ ...base.parts[0], material: undefined }] }, models)).toBeUndefined();
+  });
+
+  it("detects transformed part interference", () => {
+    const separated = { ...base, parts: [base.parts[0], { ...base.parts[1], frame: { originMm: [210, 0, 0], rotationQuat: [0, 0, 0, 1] } }] };
+    expect(analyzeAssemblyClearances(separated, models)[0].result).toEqual({ intersects: false, clearanceMm: 10, axis: "x" });
+    const findings = checkAssemblyManufacturability(base, models);
+    expect(findings.map(f => f.code)).toContain("GEOMETRIC_INTERFERENCE");
   });
 
   it("detects process/material incompatibility and capability violations", () => {
