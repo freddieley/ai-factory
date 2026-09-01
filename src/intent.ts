@@ -12,11 +12,3 @@ export function isEngineeringRequest(message: string): boolean {
   if (CASUAL_PATTERNS.some(pattern => pattern.test(text))) return false;
   return true;
 }
-
-export function casualResponse(message: string): string {
-  const normalized = message.trim().toLowerCase();
-  if (/^(thanks|thank you|cheers)[!.?]*$/i.test(normalized)) {
-    return "You're welcome. Tell me what you'd like to build or change when you're ready.";
-  }
-  return "Hi! Tell me what you'd like to build or change, and I’ll turn it into a validated engineering plan.";
-}
