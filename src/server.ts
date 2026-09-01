@@ -1,6 +1,6 @@
 import { app } from "./api.js";
 import { readFile } from "node:fs/promises";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { config } from "./config.js";
 
 const publicRoot = fileURLToPath(new URL("../public/", import.meta.url));
@@ -20,7 +20,7 @@ app.addHook("onRequest", async (request, reply) => {
   if (request.url === "/styles.css") return sendPublicFile(reply, "styles.css", "text/css; charset=utf-8");
 });
 
-if (process.argv[1] && import.meta.url === new URL(process.argv[1], "file:").href) {
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   app.listen({ port: config.PORT, host: config.HOST })
     .then(() => console.log(`AI Factory running at http://${config.HOST}:${config.PORT}`))
     .catch(error => {
