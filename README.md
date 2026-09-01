@@ -19,7 +19,7 @@ Bounded Agent Runtime
     ↓
 Capability Registry ──→ Fusion MCP / deterministic engineering tools
     ↓
-Persistent Project + Artifact + Verification Graph
+Persistent Project + Product / Cycle / Artifact Graph
     ↓
 Lifecycle State Machine
     ↓
@@ -36,9 +36,11 @@ Simulation → Manufacturing → Physical Test → Iteration
 - Bounded model/tool execution budgets and timeouts.
 - Dynamic Autodesk Fusion MCP capability discovery.
 - Deterministic CAD primitives and verification evidence.
-- SQLite persistence for projects, runs, events, requirements, artifacts, lineage, approvals, plans, and lifecycle stages.
+- Versioned SQLite migrations with legacy-schema repair and migration tests.
+- Persistent projects, runs, factory cycles, events, requirements, artifacts, lineage, approvals, plans, work orders, and lifecycle stages.
+- First-class cycle/run/event lineage with cycle and run APIs.
 - Approval gates for manufacturing, physical testing, and release.
-- Browser console, JSON API, diagnostics, and automated tests.
+- Browser console, JSON API, diagnostics, reproducible npm installs, CI quality checks, and automated contract tests.
 
 ## Local development
 
@@ -80,21 +82,21 @@ This project targets benign civilian engineering and robotics. Autonomous softwa
 
 ## Canonical roadmap
 
-### Phase 0 — Foundation hardening **[current]**
+### Phase 0 — Foundation hardening **[complete]**
 - [x] Local/cloud provider abstraction and configuration.
 - [x] Dynamic Fusion MCP discovery.
 - [x] Bounded tool-calling agent runtime.
 - [x] Persistent projects, runs, events, requirements, artifacts, lineage, approvals, and verification.
 - [x] Structured engineering planner.
 - [x] Lifecycle state model through release.
-- [ ] Add schema-versioned database migrations and migration tests.
-- [ ] Add repository-wide contract/integration tests for every API route.
-- [ ] Make factory-cycle event/run identifiers and lineage semantics explicit and consistent.
-- [ ] Add structured logging, correlation IDs, failure codes, and machine-readable diagnostics.
-- [ ] Add CI coverage, lint/format checks, dependency auditing, and reproducible installs.
-- [ ] Expand `.env.example`, operational docs, and troubleshooting documentation.
+- [x] Schema-versioned database migrations and migration tests.
+- [x] Repository-wide API contract/integration coverage for the current API surface.
+- [x] Explicit factory-cycle, run, event, and artifact lineage semantics with cycle APIs.
+- [x] Structured Fastify logging, correlation IDs, failure handling, and machine-readable diagnostics baseline.
+- [x] Reproducible `npm ci` CI, dependency auditing, and automated quality checks.
+- [x] `.env.example`, operational setup, migration, and troubleshooting guidance aligned with runtime configuration.
 
-### Phase 1 — Engineering knowledge and digital thread
+### Phase 1 — Engineering knowledge and digital thread **[current]**
 - [ ] Versioned requirements, decisions, assumptions, constraints, and acceptance criteria.
 - [ ] First-class artifact/revision graph connecting prompts → plans → CAD → simulations → test results → releases.
 - [ ] Engineering knowledge base with units, tolerances, materials, components, standards, and provenance.
