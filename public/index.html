@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="description" content="AI Factory engineering workspace">
+  <title>AI Factory</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <main class="shell">
+    <header class="topbar">
+      <div>
+        <div class="brand">AI Factory <span class="pill">Factory Kernel</span></div>
+        <p class="subtitle">Prompt → plan → CAD → verification → approval-gated manufacturing</p>
+      </div>
+      <button id="new-cycle" class="button secondary" type="button">New cycle</button>
+    </header>
+
+    <div class="workspace">
+      <section class="card conversation-card">
+        <div id="messages" class="messages" aria-live="polite">
+          <div class="message assistant"><div class="bubble">What are we building? Describe the engineering objective and I’ll work through it with you.</div></div>
+        </div>
+        <div id="status" class="status">Ready</div>
+        <form id="composer" class="composer">
+          <textarea id="prompt" rows="2" placeholder="Ask AI Factory to design, inspect, verify, or reason about an engineering task…" autocomplete="off"></textarea>
+          <button id="send" class="button primary" type="submit">Send</button>
+        </form>
+      </section>
+
+      <aside class="sidebar">
+        <section class="card panel">
+          <h2>Project</h2>
+          <label>Name<input id="name" value="Robotics Lab"></label>
+          <label>Description<input id="description" value="Civilian robotics engineering workspace."></label>
+          <button id="create-project" class="button secondary" type="button">Create project</button>
+          <div id="project-state" class="meta">No project yet</div>
+        </section>
+
+        <section class="card panel">
+          <h2>Cycle</h2>
+          <div id="cycle" class="meta">No active cycle</div>
+        </section>
+
+        <section class="card panel">
+          <div class="panel-heading"><h2>Structured JSON</h2><span class="meta">raw events</span></div>
+          <pre id="json" class="json">Events will appear here as the cycle runs.</pre>
+        </section>
+
+        <section class="card panel">
+          <div class="panel-heading"><h2>Engineering plan</h2></div>
+          <pre id="plan" class="json">No plan yet.</pre>
+        </section>
+      </aside>
+    </div>
+  </main>
+  <script src="/app.js" defer></script>
+</body>
+</html>
