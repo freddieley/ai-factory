@@ -2,10 +2,11 @@ import OpenAI from "openai";
 import { config } from "./config.js";
 import { addEvent, finishRun, createRun } from "./db.js";
 import { fusion } from "./fusion.js";
-import { getClient, providerInfo } from "./providers.js";
-import { ExecutionController, withTimeout } from "./execution.js";
+import { ExecutionController } from "./execution.js";
+import { requestModel } from "./model.js";
 import { executeCreateBox, executeCreateCylinder, executeCreateMountingPlate, executeCreateEnclosure } from "./cad.js";
 import { executeCreatePlate } from "./plate.js";
+import { getClient, providerInfo } from "./providers.js";
 
 const SYSTEM = `
 You are AI Factory, a fast, disciplined autonomous engineering agent for civilian robotics, CAD, software, and physical product R&D.
@@ -83,8 +84,14 @@ export async function runAgent(projectId: string, prompt: string) {
 
   try {
     try {
-      await withTimeout(fusion.connect(), config.TOOL_TIMEOUT_MS, "Fusion connection");
-      await withTimeout(fusion.refresh(), config.TOOL_TIMEOUT_MS, "Fusion tool discovery");
+      await Promise.race([
+        fusion.connect(),
+        new Promise((_, reject) => setTimeout(() => reject(new Error(`Fusion connection timed out after ${config.TOOL_TIMEOUT_MS}ms`)), config.TOOL_TIMEOUT_MS))
+      ]);
+      await Promise.race([
+        fusion.refresh(),
+        new Promise((_, reject) => setTimeout(() => reject(new Error(`Fusion discovery timed out after ${config.TOOL_TIMEOUT_MS}ms`)), config.TOOL_TIMEOUT_MS))
+      ]);
       addEvent(runId, "fusion.connected", { tools: fusion.getTools().map((tool) => tool.name) });
     } catch (error) {
       addEvent(runId, "fusion.unavailable", { error: String(error) });
@@ -100,7 +107,16 @@ export async function runAgent(projectId: string, prompt: string) {
 
       let response: OpenAI.Chat.Completions.ChatCompletion;
       try {
-        response = await withTimeout(client.chat.completions.create({ model: info.model, temperature: config.TEMPERATURE, messages, tools: mcpToolsAsOpenAI(), tool_choice: "auto" }), config.MODEL_TIMEOUT_MS, "Model request");
+        response = await requestModel({
+          client,
+          model: info.model,
+          temperature: config.TEMPERATURE,
+          messages,
+          tools: mcpToolsAsOpenAI(),
+          timeoutMs: config.MODEL_TIMEOUT_MS,
+          retries: config.MODEL_RETRIES,
+          onRetry: (attempt, error) => addEvent(runId, "model.retry", { step, attempt, error: String(error) })
+        });
       } catch (error) {
         addEvent(runId, "model.error", { step, error: String(error), elapsedMs: Date.now() - modelStarted });
         throw error;
@@ -143,7 +159,10 @@ export async function runAgent(projectId: string, prompt: string) {
           else if (!rawName.startsWith("fusion__")) result = { error: "Unknown tool namespace." };
           else {
             const toolName = rawName.slice("fusion__".length);
-            result = await withTimeout(fusion.callTool(toolName, args), config.TOOL_TIMEOUT_MS, `Fusion tool ${toolName}`);
+            result = await Promise.race([
+              fusion.callTool(toolName, args),
+              new Promise((_, reject) => setTimeout(() => reject(new Error(`Fusion tool ${toolName} timed out after ${config.TOOL_TIMEOUT_MS}ms`)), config.TOOL_TIMEOUT_MS))
+            ]);
           }
           const content = unwrapMcpResult(result);
           addEvent(runId, "tool.result", { step, toolName: rawName, elapsedMs: Date.now() - toolStarted, result });
