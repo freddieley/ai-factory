@@ -46,6 +46,30 @@ export function resolveLength(model: ParametricModel, expression: string): numbe
   return value;
 }
 
+export function validateFeatureGeometry(model: ParametricModel): void {
+  const boxes = model.features.filter(feature => feature.type === "box");
+  const holes = model.features.filter(feature => feature.type === "through_hole");
+  if (holes.length === 0) return;
+  if (boxes.length === 0) throw new Error("Through-hole feature validation requires at least one box feature");
+
+  const base = boxes.find(feature => feature.name === "base") ?? boxes[0];
+  const widthMm = resolveLength(model, base.width);
+  const depthMm = resolveLength(model, base.depth);
+  const heightMm = resolveLength(model, base.height);
+  if (widthMm <= 0 || depthMm <= 0 || heightMm <= 0) throw new Error("Box feature dimensions must be positive");
+
+  for (const hole of holes) {
+    const diameterMm = resolveLength(model, hole.diameter);
+    const xMm = resolveLength(model, hole.x);
+    const yMm = resolveLength(model, hole.y);
+    const radiusMm = diameterMm / 2;
+    if (diameterMm >= Math.min(widthMm, depthMm)) throw new Error(`Through-hole ${hole.name} diameter must be smaller than the base envelope`);
+    if (xMm <= radiusMm || xMm >= widthMm - radiusMm || yMm <= radiusMm || yMm >= depthMm - radiusMm) {
+      throw new Error(`Through-hole ${hole.name} must remain fully inside the base envelope`);
+    }
+  }
+}
+
 export function validateParametricModel(input: unknown): ParametricModel {
   const model = ParametricModel.parse(input);
   for (const feature of model.features) {
@@ -55,6 +79,7 @@ export function validateParametricModel(input: unknown): ParametricModel {
       if (resolveLength(model, expression) > 10_000) throw new Error(`Parametric dimension exceeds the 10,000 mm safety limit: ${expression}`);
     }
   }
+  validateFeatureGeometry(model);
   return model;
 }
 
