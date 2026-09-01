@@ -1,0 +1,13 @@
+import type { FastifyInstance } from "fastify";
+import { getProject } from "./db.js";
+import { ApprovedSource, Supplier, SupplierOffer, addApprovedSource, addSupplier, addSupplierOffer, findProcurementOptions, listApprovedSources, listSupplierOffers, listSuppliers } from "./knowledge.js";
+
+export async function registerSupplierRoutes(app: FastifyInstance){
+  app.get("/api/projects/:id/suppliers",async(request,reply)=>{const {id}=request.params as {id:string};if(!getProject(id))return reply.code(404).send({error:"project not found"});return listSuppliers(id);});
+  app.post("/api/projects/:id/suppliers",async(request,reply)=>{const {id}=request.params as {id:string};if(!getProject(id))return reply.code(404).send({error:"project not found"});try{return reply.code(201).send({id:addSupplier(id,Supplier.parse(request.body))});}catch(error){return reply.code(400).send({error:String(error)});}});
+  app.get("/api/projects/:id/supplier-offers",async(request,reply)=>{const {id}=request.params as {id:string};const {componentId}=request.query as {componentId?:string};if(!getProject(id))return reply.code(404).send({error:"project not found"});try{return listSupplierOffers(id,componentId);}catch(error){return reply.code(400).send({error:String(error)});}});
+  app.post("/api/projects/:id/supplier-offers",async(request,reply)=>{const {id}=request.params as {id:string};if(!getProject(id))return reply.code(404).send({error:"project not found"});try{return reply.code(201).send({id:addSupplierOffer(id,SupplierOffer.parse(request.body))});}catch(error){return reply.code(400).send({error:String(error)});}});
+  app.get("/api/projects/:id/components/:componentId/procurement-options",async(request,reply)=>{const {id,componentId}=request.params as {id:string;componentId:string};if(!getProject(id))return reply.code(404).send({error:"project not found"});try{return findProcurementOptions(id,componentId);}catch(error){return reply.code(400).send({error:String(error)});}});
+  app.get("/api/projects/:id/approved-sources",async(request,reply)=>{const {id}=request.params as {id:string};const {componentId}=request.query as {componentId?:string};if(!getProject(id))return reply.code(404).send({error:"project not found"});try{return listApprovedSources(id,componentId);}catch(error){return reply.code(400).send({error:String(error)});}});
+  app.post("/api/projects/:id/approved-sources",async(request,reply)=>{const {id}=request.params as {id:string};if(!getProject(id))return reply.code(404).send({error:"project not found"});try{return reply.code(201).send({id:addApprovedSource(id,ApprovedSource.parse(request.body))});}catch(error){return reply.code(400).send({error:String(error)});}});
+}
