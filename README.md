@@ -10,7 +10,8 @@ See **[GOAL.md](./GOAL.md)** for the complete end-state specification and design
 - [x] Parametric design representation independent of a single CAD vendor — canonical metric model, named dimensional parameters, vendor-neutral mechanical features, validation, and deterministic serialization.
 - [x] CAD state snapshots, deterministic diffs, immutable revisions, hash-verified replay, revision-targeted rollback, and auditable rollback-as-new-revision semantics.
 - [x] Multi-part assembly foundation — stable parts, joints, fasteners, tolerances, materials, deterministic serialization, and baseline manufacturability findings.
-- [ ] Assembly coordinate frames, joint limits, fits/clearances, material/process compatibility, mass properties, and machine/process capability checks.
+- [x] Assembly engineering constraints — coordinate frames, joint limits, material/process compatibility, mass estimation where geometry permits, and machine/process capability checks.
+- [ ] Robust geometric transforms, datum schemes, fit/clearance analysis, richer material/process data, and machine-specific capability evidence.
 - [ ] Automated drawing/document generation.
 - [ ] Design-space exploration and constrained optimization.
 - [ ] Geometry/feature validation and regression tests against known designs.
