@@ -1,0 +1,24 @@
+import { z } from "zod";
+import { randomUUID } from "node:crypto";
+import { db } from "./db.js";
+
+export const Unit = z.enum(["mm","cm","m","in","deg","rad","kg","g","N","Nm","V","A","W","Hz","s"]);
+export type Unit = z.infer<typeof Unit>;
+const LENGTH_TO_MM: Record<string,number>={mm:1,cm:10,m:1000,in:25.4};
+export function convertUnit(value:number,from:Unit,to:Unit):number{if(from===to)return value;if(LENGTH_TO_MM[from]&&LENGTH_TO_MM[to])return value*LENGTH_TO_MM[from]/LENGTH_TO_MM[to];if(from==="deg"&&to==="rad")return value*Math.PI/180;if(from==="rad"&&to==="deg")return value*180/Math.PI;throw new Error(`unsupported unit conversion: ${from} -> ${to}`);}
+export const KnowledgeSource=z.object({kind:z.enum(["manual","datasheet","standard","supplier","measurement","simulation","generated"]),ref:z.string().min(1),uri:z.string().url().optional(),observedAt:z.string().datetime().optional(),expiresAt:z.string().datetime().optional(),confidence:z.number().min(0).max(1).default(1)});
+export const Material=z.object({name:z.string().min(1),grade:z.string().optional(),densityKgM3:z.number().positive().optional(),tensileStrengthMPa:z.number().positive().optional(),yieldStrengthMPa:z.number().positive().optional(),sources:z.array(KnowledgeSource).default([])});
+export type MaterialInput=z.infer<typeof Material>;
+export const Component=z.object({partNumber:z.string().min(1),name:z.string().min(1),manufacturer:z.string().optional(),category:z.string().min(1),lifecycle:z.enum(["active","nrnd","obsolete","unknown"]).default("unknown"),massG:z.number().nonnegative().optional(),voltageMinV:z.number().optional(),voltageMaxV:z.number().optional(),currentMaxA:z.number().nonnegative().optional(),sources:z.array(KnowledgeSource).default([])});
+export type ComponentInput=z.infer<typeof Component>;
+export const Standard=z.object({code:z.string().min(1),title:z.string().min(1),jurisdiction:z.string().optional(),revision:z.string().optional(),source:KnowledgeSource});
+export const ManufacturingConstraint=z.object({process:z.string().min(1),material:z.string().optional(),minFeatureMm:z.number().positive().optional(),minWallMm:z.number().positive().optional(),toleranceMm:z.number().positive().optional(),maxPartMm:z.object({x:z.number().positive(),y:z.number().positive(),z:z.number().positive()}).optional(),source:KnowledgeSource});
+export function addMaterial(projectId:string,input:MaterialInput){const value=Material.parse(input),id=randomUUID(),now=new Date().toISOString();db.prepare(`INSERT INTO materials(id,project_id,name,grade,data_json,created_at,updated_at) VALUES(?,?,?,?,?,?,?)`).run(id,projectId,value.name,value.grade??null,JSON.stringify(value),now,now);return id;}
+export function listMaterials(projectId:string){return db.prepare(`SELECT * FROM materials WHERE project_id=? ORDER BY name ASC,grade ASC`).all(projectId);}
+export function addComponent(projectId:string,input:ComponentInput){const value=Component.parse(input),id=randomUUID(),now=new Date().toISOString();db.prepare(`INSERT INTO components(id,project_id,part_number,name,manufacturer,category,lifecycle,data_json,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)`).run(id,projectId,value.partNumber,value.name,value.manufacturer??null,value.category,value.lifecycle,JSON.stringify(value),now,now);return id;}
+export function listComponents(projectId:string){return db.prepare(`SELECT * FROM components WHERE project_id=? ORDER BY name ASC,part_number ASC`).all(projectId);}
+export function addStandard(projectId:string,input:z.input<typeof Standard>){const value=Standard.parse(input),id=randomUUID(),now=new Date().toISOString();db.prepare(`INSERT INTO standards(id,project_id,code,title,jurisdiction,revision,source_json,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)`).run(id,projectId,value.code,value.title,value.jurisdiction??null,value.revision??null,JSON.stringify(value.source),now,now);return id;}
+export function listStandards(projectId:string){return db.prepare(`SELECT * FROM standards WHERE project_id=? ORDER BY code ASC`).all(projectId);}
+export function addManufacturingConstraint(projectId:string,input:z.input<typeof ManufacturingConstraint>){const value=ManufacturingConstraint.parse(input),id=randomUUID(),now=new Date().toISOString();db.prepare(`INSERT INTO manufacturing_constraints(id,project_id,process,material,data_json,created_at,updated_at) VALUES(?,?,?,?,?,?,?)`).run(id,projectId,value.process,value.material??null,JSON.stringify(value),now,now);return id;}
+export function listManufacturingConstraints(projectId:string){return db.prepare(`SELECT * FROM manufacturing_constraints WHERE project_id=? ORDER BY process ASC`).all(projectId);}
+export function listKnowledge(projectId:string){return{materials:listMaterials(projectId),components:listComponents(projectId),standards:listStandards(projectId),manufacturingConstraints:listManufacturingConstraints(projectId)};}
