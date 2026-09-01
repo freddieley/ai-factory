@@ -17,8 +17,8 @@ This is the execution queue for the factory. Work is complete only when implemen
 - [x] CAD state snapshots, deterministic diffs, immutable revisions, hash-verified replay, revision-targeted rollback, and auditable rollback-as-new-revision semantics.
 - [x] Multi-part assembly foundation — stable parts, joints, fasteners, tolerances, materials, deterministic serialization, and baseline manufacturability findings.
 - [x] Assembly engineering constraints — coordinate frames, joint limits, material/process compatibility, mass estimation where geometry permits, and machine/process capability checks.
-- [ ] Robust geometric transforms, datum schemes, fit/clearance analysis, richer material/process data, and machine-specific capability evidence.
-- [ ] Automated drawing/document generation.
+- [x] Robust geometric transforms, datum schemes, fit/clearance analysis, richer material/process data, and machine-specific capability evidence.
+- [x] Automated drawing/document generation.
 - [ ] Design-space exploration and constrained optimization.
 - [ ] Geometry/feature validation and regression tests against known designs.
 
@@ -89,4 +89,4 @@ This is the execution queue for the factory. Work is complete only when implemen
 
 ## Development rule
 
-`main` / `origin/main` is the sole development branch. On `continue`, start at the first incomplete item in the active phase. Finish the item end-to-end—including code, tests, migrations, documentation, diagnostics, and CI—before marking it complete or advancing. Never treat a stub, mock-only path, or unverified integration as completion.
+`main` / `origin/main` is the sole development branch. On `continue`, start at the first incomplete item in the active phase. Finish the item end-to-end—including code, tests, migrations, diagnostics, documentation, and CI—before marking it complete or advancing. Never treat a stub, mock-only path, or unverified integration as completion.
