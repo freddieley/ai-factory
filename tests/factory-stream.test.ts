@@ -8,6 +8,10 @@ describe("factory stream presentation",()=>{
     expect(messageForCycleEvent({id:"3",type:"model.message",payload:JSON.stringify({content:"Here is the result."}),created_at:""})).toBe("Here is the result.");
   });
 
+  it("renders conversational responses without engineering lifecycle noise",()=>{
+    expect(messageForCycleEvent({id:"4",type:"factory.conversation.response",payload:JSON.stringify({message:"What would you like to build?"}),created_at:""})).toBe("What would you like to build?");
+  });
+
   it("serializes SSE frames without mixing structured JSON into message text",()=>{
     const frame=sse("message",{role:"assistant",text:"Readable answer"});
     expect(frame).toContain("event: message");
