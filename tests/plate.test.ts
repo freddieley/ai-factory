@@ -31,7 +31,10 @@ describe("deterministic plate-with-hole CAD primitive", () => {
     expect(script).toContain("Point3D.create(3, 2, 0)");
     expect(script).toContain("0.3");
     expect(script).toContain("CutFeatureOperation");
-    expect(script).toContain("setThroughAllExtent");
+    expect(script).toContain("ThroughAllExtentDefinition.create()");
+    expect(script).toContain("setOneSideExtent(holeExtent");
+    expect(script).toContain("ExtentDirections.PositiveExtentDirection");
+    expect(script).not.toContain("setThroughAllExtent");
     expect(script).toContain("operation=create_plate_with_hole");
     expect(script).toContain("hole_diameter_mm=6");
     expect(script).toContain("hole_x_mm=30");
