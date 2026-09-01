@@ -1,9 +1,12 @@
 import { app } from "./api.js";
+import { registerDesignSpaceRoutes } from "./design-space-routes.js";
 import { readFile } from "node:fs/promises";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { config } from "./config.js";
 
 export { app } from "./api.js";
+
+registerDesignSpaceRoutes(app);
 
 const publicRoot = fileURLToPath(new URL("../public/", import.meta.url));
 
