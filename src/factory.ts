@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { createFactoryCycle, finishFactoryCycle, addCycleEvent, addEvent, listEvents } from "./db.js";
+import { createFactoryCycle, finishFactoryCycle, addCycleEvent, listEvents } from "./db.js";
 import { runAgent } from "./agent.js";
 import { generateEngineeringPlan } from "./planning.js";
 import { initializeProjectStages, transitionProjectStage } from "./lifecycle-db.js";
@@ -20,7 +20,6 @@ export async function runFactory(request:FactoryRequest){
     try{
       const planning=await generateEngineeringPlan(normalized.projectId,normalized.objective,normalized.constraints);addCycleEvent(cycleId,"factory.planning.completed",{planId:planning.plan.id,requirements:planning.plan.requirements.length,steps:planning.plan.steps.length,requiresApproval:planRequiresApproval(planning.plan)});transitionProjectStage(normalized.projectId,"planning","passed");transitionProjectStage(normalized.projectId,"design","ready");
     }catch(error){addCycleEvent(cycleId,"factory.planning.failed",{error:String(error)});transitionProjectStage(normalized.projectId,"planning","failed",{error:String(error)});finishFactoryCycle(cycleId,"needs_review");addCycleEvent(cycleId,"factory.cycle.completed",{status:"needs_review",reason:"Validated engineering planning failed; execution was not attempted."});return {cycleId,status:"needs_review",iterations:results,error:String(error)};}
-
     for(let iteration=1;iteration<=normalized.maxIterations;iteration++){
       const prompt=iteration===1?`Execute the validated engineering plan for this project. Objective: ${normalized.objective}\nConstraints:\n${normalized.constraints.join("\n")||"None specified"}\nUse the saved engineering plan as the source of truth. Inspect the current Fusion state first. Make only the CAD changes required by the plan. Verify the resulting state with deterministic evidence. Do not manufacture, dispatch, or perform irreversible physical operations.`:`Iteration ${iteration} of a bounded CAD engineering loop. Re-open the current Fusion state, inspect the existing design against the saved engineering plan and objective, identify unmet requirements, make only necessary CAD corrections, and verify the resulting state with Fusion evidence. Objective: ${normalized.objective}\nConstraints:\n${normalized.constraints.join("\n")||"None specified"}\nDo not manufacture or dispatch anything.`;
       addCycleEvent(cycleId,"factory.iteration.started",{iteration});transitionProjectStage(normalized.projectId,"design","running");
