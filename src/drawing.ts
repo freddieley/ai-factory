@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { z } from "zod";
 import { canonicalParametricJson, type ParametricModel, resolveLength, validateParametricModel } from "./parametric.js";
 
@@ -20,16 +21,8 @@ export const DrawingDocument = z.object({
 });
 export type DrawingDocument = z.infer<typeof DrawingDocument>;
 
-function sha256(value: string): string {
-  // Kept dependency-free and deterministic by using Web Crypto when available.
-  // The Node adapter below is loaded lazily so this module remains portable to browser consumers.
-  throw new Error("sha256 must be supplied by the runtime adapter");
-}
-
 function sourceHash(model: ParametricModel): string {
-  // Canonical JSON is the drawing's immutable source identity. Node consumers replace
-  // this helper with the synchronous crypto implementation exposed below.
-  return sha256(canonicalParametricJson(model));
+  return createHash("sha256").update(canonicalParametricJson(model)).digest("hex");
 }
 
 export function buildDrawingDocument(input: unknown): DrawingDocument {
@@ -53,7 +46,7 @@ export function buildDrawingDocument(input: unknown): DrawingDocument {
       { id: "right", widthMm: depthMm, heightMm },
     ],
     notes: [
-      `Units: mm.`,
+      "Units: mm.",
       `Overall envelope: ${widthMm} × ${depthMm} × ${heightMm} mm.`,
       holes.length ? `${holes.length} through-hole feature(s) are present in the source model.` : "No through-hole features are present in the source model.",
       "Verify all dimensions and tolerances against the approved engineering model before manufacture.",
@@ -63,7 +56,7 @@ export function buildDrawingDocument(input: unknown): DrawingDocument {
 
 export function renderDrawingMarkdown(document: DrawingDocument): string {
   const drawing = DrawingDocument.parse(document);
-  const lines = [
+  return [
     `# ${drawing.title}`,
     "",
     "## Mechanical drawing",
@@ -72,7 +65,7 @@ export function renderDrawingMarkdown(document: DrawingDocument): string {
     `Source hash: \`${drawing.sourceHash}\``,
     `Units: ${drawing.units}`,
     "",
-    "| View | Width (mm) | Height (mm) | |",
+    "| View | Width (mm) | Height (mm) |",
     "| --- | ---: | ---: |",
     ...drawing.views.map(view => `| ${view.id} | ${view.widthMm} | ${view.heightMm} |`),
     "",
@@ -80,8 +73,7 @@ export function renderDrawingMarkdown(document: DrawingDocument): string {
     "",
     ...drawing.notes.map(note => `- ${note}`),
     "",
-  ];
-  return lines.join("\n");
+  ].join("\n");
 }
 
 export function renderDrawingSvg(document: DrawingDocument): string {
@@ -126,9 +118,4 @@ export function canonicalDrawingDocument(document: DrawingDocument): string {
     views: [...value.views].sort((a, b) => a.id.localeCompare(b.id)),
     notes: [...value.notes],
   });
-}
-
-export function setDrawingHashImplementation(hash: (value: string) => string): void {
-  // This is intentionally explicit so applications can provide their platform's hash implementation.
-  sha256 = hash;
 }
