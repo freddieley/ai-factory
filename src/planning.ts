@@ -1,10 +1,8 @@
-import OpenAI from "openai";
-import { config } from "./config.js";
-import { getClient, providerInfo } from "./providers.js";
+import { providerInfo, getClient } from "./providers.js";
 import { EngineeringPlan } from "./engineering.js";
 import { savePlan } from "./engineering-db.js";
 
-const PLAN_SCHEMA = `{
+export const PLAN_SCHEMA = `{
   "id": "PLAN-xxxxxxxx",
   "objective": "short engineering objective",
   "assumptions": ["explicit assumption"],
@@ -35,7 +33,7 @@ export function buildPlanningPrompt(objective: string, constraints: string[]) {
 function extractJson(content: string): unknown {
   const trimmed = content.trim();
   try { return JSON.parse(trimmed); } catch { /* continue */ }
-  const fenced = trimmed.match(/```(?:json)?\\s*([\\s\\S]*?)\\s*```/i);
+  const fenced = trimmed.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
   if (fenced) return JSON.parse(fenced[1]);
   const start = trimmed.indexOf("{");
   const end = trimmed.lastIndexOf("}");
@@ -65,5 +63,3 @@ export async function generateEngineeringPlan(projectId: string, objective: stri
   savePlan(projectId, plan);
   return { plan, provider: info };
 }
-
-export { PLAN_SCHEMA };
