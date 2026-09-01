@@ -22,6 +22,9 @@ describe("deterministic CAD executor", () => {
     expect(script).toContain("design = adsk.fusion.Design.cast(product)");
     expect(script).toContain("addTwoPointRectangle(p1, p2)");
     expect(script).toContain("createByReal(0.5)");
+    expect(script).toContain("extInput = extrudes.createInput(");
+    expect(script).toContain("extrudes.add(extInput)");
+    expect(script).not.toContain("exInput = extrudes.createInput(");
     expect(script).not.toContain("Design.get");
     expect(script).not.toContain("Design.create");
   });
