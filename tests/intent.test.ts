@@ -18,6 +18,6 @@ describe("request intent gate", () => {
   });
 
   it("returns a useful conversational response", () => {
-    expect(casualResponse("Hi")).toContain("Tell me what you’d like to build or change");
+    expect(casualResponse("Hi")).toContain("Tell me what you'd like to build or change");
   });
 });
