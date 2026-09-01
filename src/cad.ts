@@ -47,7 +47,11 @@ function parseToolText(result: unknown): CadResult {
   const width = text.match(/width_mm=([0-9.eE+-]+)/)?.[1];
   const depth = text.match(/depth_mm=([0-9.eE+-]+)/)?.[1];
   const height = text.match(/height_mm=([0-9.eE+-]+)/)?.[1];
-  const document = text.match(/document=([^\"}]+)/)?.[1];
+
+  // The Fusion MCP serializes console output into JSON, so a newline after the
+  // document name may appear as an escaped "\\n". Stop at the first escaped
+  // control sequence as well as quotes/braces to avoid capturing later errors.
+  const document = text.match(/document=([^\\"}\r\n]+)/)?.[1];
 
   if (!width || !depth || !height) {
     return { success: false, operation: "create_box", error: `Fusion did not return verification dimensions: ${text}` };
