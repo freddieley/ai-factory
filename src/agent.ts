@@ -4,7 +4,7 @@ import { addEvent, finishRun, createRun } from "./db.js";
 import { fusion } from "./fusion.js";
 import { getClient, providerInfo } from "./providers.js";
 import { ExecutionController, withTimeout } from "./execution.js";
-import { executeCreateBox, executeCreateCylinder, executeCreateMountingPlate } from "./cad.js";
+import { executeCreateBox, executeCreateCylinder, executeCreateMountingPlate, executeCreateEnclosure } from "./cad.js";
 
 const SYSTEM = `
 You are AI Factory, a fast, disciplined engineering agent for civilian robotics and CAD work.
@@ -29,21 +29,23 @@ Deterministic CAD tools:
 - ai_factory_create_box: rectangular solid with widthMm, depthMm, heightMm.
 - ai_factory_create_cylinder: cylindrical solid with radiusMm and heightMm.
 - ai_factory_create_mounting_plate: one rectangular base plate plus four cylindrical mounting posts, all in a new Fusion design. Parameters: widthMm, depthMm, plateHeightMm, postRadiusMm, postHeightMm, insetMm.
+- ai_factory_create_enclosure: one rectangular base plus four surrounding walls in a new Fusion design. Parameters: widthMm, depthMm, baseHeightMm, wallHeightMm, wallThicknessMm.
 - All deterministic CAD tools create a new Fusion design and return verified solid-body and bounding-box dimensions.
 - Use create_box for plates, blocks, rectangular housings, and other cuboids.
 - Use create_cylinder for shafts, pins, posts, spacers, and other simple cylindrical solids.
 - Use create_mounting_plate for a useful electronics/robotics mounting base or similar plate with four corner posts. Do not decompose this into five separate tool calls.
+- Use create_enclosure for open-top rectangular electronics enclosures or trays. Do not decompose this into five separate tool calls.
 - Do not use a generic Fusion Python script when one of these deterministic tools directly satisfies the request.
 
 Fusion Python API facts:
 - Get the application with adsk.core.Application.get().
 - Autodesk's supported new-design workflow is app.documents.add(adsk.core.DocumentTypes.FusionDesignDocumentType), followed by adsk.fusion.Design.cast(app.activeProduct).
 - Get the root component with design.rootComponent.
-- Add a sketch with rootComp.sketches.add(rootComp.xYConstructionPlane) or another construction plane.
+- Add a sketch with root.sketches.add(root.xYConstructionPlane) or another construction plane.
 - Create a rectangle with sketch.sketchCurves.sketchLines.addTwoPointRectangle(...).
 - Create a circle with sketch.sketchCurves.sketchCircles.addByCenterRadius(...).
 - Get the profile with sketch.profiles.item(0).
-- Create an extrusion with rootComp.features.extrudeFeatures.createInput(...), setDistanceExtent(...), then extrudes.add(...).
+- Create an extrusion with root.features.extrudeFeatures.createInput(...), setDistanceExtent(...), then extrudes.add(...).
 - Use root.bRepBodies for solid-body verification.
 - Do NOT use adsk.fusion.Design.get(), adsk.fusion.Design.create(), createSketchOn(), or createExtrude().
 - Fusion API lengths passed to ValueInput.createByReal are centimeters in this workflow. Convert millimetres to centimetres.
@@ -56,7 +58,8 @@ type ToolCall = { id: string; type: "function"; function: { name: string; argume
 const LOCAL_CAD_TOOLS: OpenAI.Chat.Completions.ChatCompletionTool[] = [
   { type: "function", function: { name: "ai_factory_create_box", description: "Create and verify a rectangular solid in a new Fusion design. Use for simple box/plate geometry.", parameters: { type: "object", additionalProperties: false, properties: { widthMm: { type: "number", description: "Width in millimetres." }, depthMm: { type: "number", description: "Depth in millimetres." }, heightMm: { type: "number", description: "Height in millimetres." } }, required: ["widthMm", "depthMm", "heightMm"] } } },
   { type: "function", function: { name: "ai_factory_create_cylinder", description: "Create and verify a cylindrical solid in a new Fusion design. Use for simple shafts, pins, posts, spacers, and cylinders.", parameters: { type: "object", additionalProperties: false, properties: { radiusMm: { type: "number", description: "Radius in millimetres." }, heightMm: { type: "number", description: "Height in millimetres." } }, required: ["radiusMm", "heightMm"] } } },
-  { type: "function", function: { name: "ai_factory_create_mounting_plate", description: "Create and verify a rectangular mounting plate with four cylindrical corner posts in one new Fusion design. Use for electronics and robotics mounting bases.", parameters: { type: "object", additionalProperties: false, properties: { widthMm: { type: "number", description: "Overall plate width in millimetres." }, depthMm: { type: "number", description: "Overall plate depth in millimetres." }, plateHeightMm: { type: "number", description: "Plate thickness in millimetres." }, postRadiusMm: { type: "number", description: "Radius of each mounting post in millimetres." }, postHeightMm: { type: "number", description: "Height of each mounting post in millimetres." }, insetMm: { type: "number", description: "Distance from each plate edge to each post center in millimetres." } }, required: ["widthMm", "depthMm", "plateHeightMm", "postRadiusMm", "postHeightMm", "insetMm"] } } }
+  { type: "function", function: { name: "ai_factory_create_mounting_plate", description: "Create and verify a rectangular mounting plate with four cylindrical corner posts in one new Fusion design. Use for electronics and robotics mounting bases.", parameters: { type: "object", additionalProperties: false, properties: { widthMm: { type: "number", description: "Overall plate width in millimetres." }, depthMm: { type: "number", description: "Overall plate depth in millimetres." }, plateHeightMm: { type: "number", description: "Plate thickness in millimetres." }, postRadiusMm: { type: "number", description: "Radius of each mounting post in millimetres." }, postHeightMm: { type: "number", description: "Height of each mounting post in millimetres." }, insetMm: { type: "number", description: "Distance from each plate edge to each post center in millimetres." } }, required: ["widthMm", "depthMm", "plateHeightMm", "postRadiusMm", "postHeightMm", "insetMm"] } } },
+  { type: "function", function: { name: "ai_factory_create_enclosure", description: "Create and verify an open-top rectangular electronics enclosure/tray with one base and four surrounding walls in one new Fusion design.", parameters: { type: "object", additionalProperties: false, properties: { widthMm: { type: "number", description: "Overall enclosure width in millimetres." }, depthMm: { type: "number", description: "Overall enclosure depth in millimetres." }, baseHeightMm: { type: "number", description: "Base thickness in millimetres." }, wallHeightMm: { type: "number", description: "Wall height above the base in millimetres." }, wallThicknessMm: { type: "number", description: "Wall thickness in millimetres." } }, required: ["widthMm", "depthMm", "baseHeightMm", "wallHeightMm", "wallThicknessMm"] } } }
 ];
 
 function mcpToolsAsOpenAI(): OpenAI.Chat.Completions.ChatCompletionTool[] {
@@ -136,6 +139,7 @@ export async function runAgent(projectId: string, prompt: string) {
           if (rawName === "ai_factory_create_box") result = await executeCreateBox(args);
           else if (rawName === "ai_factory_create_cylinder") result = await executeCreateCylinder(args);
           else if (rawName === "ai_factory_create_mounting_plate") result = await executeCreateMountingPlate(args);
+          else if (rawName === "ai_factory_create_enclosure") result = await executeCreateEnclosure(args);
           else if (!rawName.startsWith("fusion__")) result = { error: "Unknown tool namespace." };
           else {
             const toolName = rawName.slice("fusion__".length);
