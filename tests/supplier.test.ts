@@ -6,11 +6,11 @@ describe("supplier discovery and approved procurement sources",()=>{
   it("stores supplier offers and ranks in-stock options before backorders",()=>{
     const project=createProject("supplier-test","procurement");
     const component=addComponent(project!.id,{partNumber:"MOTOR-01",name:"Motor",category:"actuator"});
-    const supplierA=addSupplier(project,{code:"SUP-A",name:"Supplier A",status:"active"});
-    const supplierB=addSupplier(project,{code:"SUP-B",name:"Supplier B",status:"active"});
-    addSupplierOffer(project,{componentId:component,supplierId:supplierB,supplierPartNumber:"B-01",unitPrice:4,currency:"GBP",availability:"backorder",leadTimeDays:3,source:{kind:"supplier",ref:"quote-b"}});
-    addSupplierOffer(project,{componentId:component,supplierId:supplierA,supplierPartNumber:"A-01",unitPrice:8,currency:"GBP",availability:"in_stock",stockQuantity:12,source:{kind:"supplier",ref:"quote-a"}});
-    const options=findProcurementOptions(project,component) as Array<{supplier_code:string;availability:string}>;
+    const supplierA=addSupplier(project!.id,{code:"SUP-A",name:"Supplier A",status:"active"});
+    const supplierB=addSupplier(project!.id,{code:"SUP-B",name:"Supplier B",status:"active"});
+    addSupplierOffer(project!.id,{componentId:component,supplierId:supplierB,supplierPartNumber:"B-01",unitPrice:4,currency:"GBP",availability:"backorder",leadTimeDays:3,source:{kind:"supplier",ref:"quote-b"}});
+    addSupplierOffer(project!.id,{componentId:component,supplierId:supplierA,supplierPartNumber:"A-01",unitPrice:8,currency:"GBP",availability:"in_stock",stockQuantity:12,source:{kind:"supplier",ref:"quote-a"}});
+    const options=findProcurementOptions(project!.id,component) as Array<{supplier_code:string;availability:string}>;
     expect(options.map(option=>option.supplier_code)).toEqual(["SUP-A","SUP-B"]);
   });
   it("prevents cross-project offers and requires a matching offer for approval",()=>{
