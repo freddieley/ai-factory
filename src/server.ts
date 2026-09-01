@@ -4,6 +4,7 @@ import { createProject, getProject, getRun, listEvents, listProjects, listApprov
 import { providerInfo } from "./providers.js";
 import { fusion } from "./fusion.js";
 import { runAgent } from "./agent.js";
+import { listCapabilities } from "./capabilities.js";
 
 const app = Fastify({ logger: true });
 
@@ -17,12 +18,21 @@ app.get("/api/health", async () => ({
     modelTimeoutMs: config.MODEL_TIMEOUT_MS,
     toolTimeoutMs: config.TOOL_TIMEOUT_MS
   },
+  factory: {
+    deterministicCapabilities: listCapabilities().map(({ name, domain, description }) => ({ name, domain, description })),
+    domains: [...new Set(listCapabilities().map(capability => capability.domain))]
+  },
   fusion: {
     enabled: config.FUSION_MCP_ENABLED,
     connected: fusion.isConnected(),
     tools: fusion.getTools().map(t => t.name)
   }
 }));
+app.get("/api/capabilities", async (request) => {
+  const { domain } = request.query as { domain?: string };
+  const capabilities = domain ? listCapabilities(domain as Parameters<typeof listCapabilities>[0]) : listCapabilities();
+  return capabilities.map(({ name, domain: capabilityDomain, description, parameters }) => ({ name, domain: capabilityDomain, description, parameters }));
+});
 app.get("/api/projects", async () => listProjects());
 app.post("/api/projects", async (request, reply) => {
   const body = request.body as { name?: string; description?: string };
