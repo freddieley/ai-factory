@@ -10,6 +10,9 @@ export const db = new Database(config.DATABASE_PATH);
 db.pragma("journal_mode = WAL");
 db.pragma("foreign_keys = ON");
 
+// Bootstrap the schema. The compatibility ALTERs immediately below keep existing
+// development databases usable; schema_migrations records the resulting baseline
+// so all future changes can be additive, ordered, and testable.
 db.exec(`
 CREATE TABLE IF NOT EXISTS projects (id TEXT PRIMARY KEY, name TEXT NOT NULL, description TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'active', created_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS runs (id TEXT PRIMARY KEY, project_id TEXT NOT NULL, prompt TEXT NOT NULL, provider TEXT NOT NULL, model TEXT NOT NULL, status TEXT NOT NULL, output TEXT, created_at TEXT NOT NULL, completed_at TEXT);
@@ -18,6 +21,7 @@ CREATE TABLE IF NOT EXISTS approvals (id TEXT PRIMARY KEY, project_id TEXT NOT N
 CREATE TABLE IF NOT EXISTS requirements (id TEXT PRIMARY KEY, project_id TEXT NOT NULL, source TEXT NOT NULL, key TEXT NOT NULL, value TEXT NOT NULL, unit TEXT, required INTEGER NOT NULL DEFAULT 1, status TEXT NOT NULL DEFAULT 'active', created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS artifacts (id TEXT PRIMARY KEY, project_id TEXT NOT NULL, run_id TEXT, parent_artifact_id TEXT, kind TEXT NOT NULL, name TEXT NOT NULL, uri TEXT, content_hash TEXT, metadata TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS artifact_links (parent_artifact_id TEXT NOT NULL, child_artifact_id TEXT NOT NULL, relation TEXT NOT NULL, created_at TEXT NOT NULL, PRIMARY KEY (parent_artifact_id, child_artifact_id, relation));
+CREATE TABLE IF NOT EXISTS schema_migrations (version INTEGER PRIMARY KEY, name TEXT NOT NULL, applied_at TEXT NOT NULL);
 `);
 
 function tableColumns(table: string): Set<string> {
@@ -45,8 +49,11 @@ addColumnIfMissing("artifacts", "content_hash", "TEXT");
 addColumnIfMissing("artifacts", "metadata", "TEXT NOT NULL DEFAULT '{}'");
 addColumnIfMissing("artifacts", "created_at", "TEXT NOT NULL DEFAULT ''");
 
-// Older databases may contain an artifacts.parent_artifact_id column but not the
-// normalized lineage table. Create the table only after all artifact columns exist.
+const migrationNow = new Date().toISOString();
+db.prepare(`UPDATE requirements SET created_at=? WHERE created_at=''`).run(migrationNow);
+db.prepare(`UPDATE requirements SET updated_at=created_at WHERE updated_at=''`).run();
+db.prepare(`UPDATE artifacts SET created_at=? WHERE created_at=''`).run(migrationNow);
+
 db.exec(`
 CREATE TABLE IF NOT EXISTS artifact_links (parent_artifact_id TEXT NOT NULL, child_artifact_id TEXT NOT NULL, relation TEXT NOT NULL, created_at TEXT NOT NULL, PRIMARY KEY (parent_artifact_id, child_artifact_id, relation));
 CREATE INDEX IF NOT EXISTS idx_requirements_project ON requirements(project_id, created_at);
@@ -57,10 +64,21 @@ CREATE INDEX IF NOT EXISTS idx_artifact_links_child ON artifact_links(child_arti
 CREATE INDEX IF NOT EXISTS idx_events_run ON events(run_id, created_at);
 `);
 
-const migrationNow = new Date().toISOString();
-db.prepare(`UPDATE requirements SET created_at=? WHERE created_at=''`).run(migrationNow);
-db.prepare(`UPDATE requirements SET updated_at=created_at WHERE updated_at=''`).run();
-db.prepare(`UPDATE artifacts SET created_at=? WHERE created_at=''`).run(migrationNow);
+// Version 1 represents the schema that this release guarantees. Future schema
+// changes must use a higher version and be applied transactionally before the
+// application starts serving requests.
+const hasBaseline = db.prepare(`SELECT 1 FROM schema_migrations WHERE version=1`).get();
+if (!hasBaseline) {
+  db.prepare(`INSERT INTO schema_migrations (version,name,applied_at) VALUES (?,?,?)`).run(1, "initial-factory-schema", new Date().toISOString());
+}
+
+export function getSchemaVersion(): number {
+  return (db.prepare(`SELECT COALESCE(MAX(version),0) AS version FROM schema_migrations`).get() as { version: number }).version;
+}
+
+export function listSchemaMigrations() {
+  return db.prepare(`SELECT version,name,applied_at FROM schema_migrations ORDER BY version ASC`).all();
+}
 
 export function createProject(name: string, description: string) { const id=randomUUID(); db.prepare(`INSERT INTO projects (id,name,description,created_at) VALUES (?,?,?,?)`).run(id,name,description,new Date().toISOString()); return getProject(id); }
 export function getProject(id:string){return db.prepare(`SELECT * FROM projects WHERE id=?`).get(id);}
