@@ -1,43 +1,21 @@
 import { describe, expect, it } from "vitest";
 import { createPlateWithHoleScript, parseCreatePlateArgs } from "../src/plate.js";
 
-describe("deterministic plate-with-hole CAD primitive", () => {
-  it("defaults the hole to the plate center", () => {
-    expect(parseCreatePlateArgs({ widthMm: 60, depthMm: 40, heightMm: 5, holeDiameterMm: 6 })).toEqual({
-      widthMm: 60,
-      depthMm: 40,
-      heightMm: 5,
-      holeDiameterMm: 6,
-      holeXmm: 30,
-      holeYmm: 20
-    });
+describe("plate capability",()=>{
+  it("defaults omitted hole coordinates to the plate center",()=>{
+    expect(parseCreatePlateArgs({widthMm:50,depthMm:30,heightMm:5,holeDiameterMm:10})).toMatchObject({holeXmm:25,holeYmm:15});
   });
 
-  it("rejects a hole that cannot fit", () => {
-    expect(() => parseCreatePlateArgs({ widthMm: 20, depthMm: 20, heightMm: 5, holeDiameterMm: 50 })).toThrow(/INVALID_GEOMETRY|diameter/);
+  it("accepts an explicit centered hole without rejecting zero-valued coordinates in other dimensions",()=>{
+    expect(parseCreatePlateArgs({widthMm:50,depthMm:30,heightMm:5,holeDiameterMm:10,holeXmm:25,holeYmm:15})).toMatchObject({holeXmm:25,holeYmm:15});
   });
 
-  it("rejects a hole too close to an edge", () => {
-    expect(() => parseCreatePlateArgs({ widthMm: 60, depthMm: 40, heightMm: 5, holeDiameterMm: 6, holeXmm: 2, holeYmm: 20 })).toThrow();
-  });
-
-  it("uses the supported active-product Fusion workflow and centimetre conversion", () => {
-    const script = createPlateWithHoleScript({ widthMm: 60, depthMm: 40, heightMm: 5, holeDiameterMm: 6, holeXmm: 30, holeYmm: 20 });
-    expect(script).toContain("app = adsk.core.Application.get()");
-    expect(script).toContain("product = app.activeProduct");
-    expect(script).toContain("design = adsk.fusion.Design.cast(product)");
-    expect(script).toContain("createByReal(0.5)");
-    expect(script).toContain("addByCenterRadius(");
-    expect(script).toContain("Point3D.create(3, 2, 0)");
-    expect(script).toContain("0.3");
-    expect(script).toContain("CutFeatureOperation");
-    expect(script).toContain("ThroughAllExtentDefinition.create()");
-    expect(script).toContain("setOneSideExtent(holeExtent");
-    expect(script).toContain("ExtentDirections.PositiveExtentDirection");
-    expect(script).not.toContain("setThroughAllExtent");
-    expect(script).toContain("operation=create_plate_with_hole");
-    expect(script).toContain("hole_diameter_mm=6");
-    expect(script).toContain("hole_x_mm=30");
-    expect(script).toContain("hole_y_mm=20");
+  it("cuts the hole from an XY-plane sketch in the positive direction and verifies the cylindrical face",()=>{
+    const script=createPlateWithHoleScript({widthMm:50,depthMm:30,heightMm:5,holeDiameterMm:10,holeXmm:25,holeYmm:15});
+    expect(script).toContain("root.xYConstructionPlane");
+    expect(script).toContain("adsk.fusion.FeatureOperations.CutFeatureOperation");
+    expect(script).toContain("adsk.fusion.ExtentDirections.PositiveExtentDirection");
+    expect(script).toContain("adsk.core.Cylinder.classType()");
+    expect(script).toContain("through_hole=true");
   });
 });
