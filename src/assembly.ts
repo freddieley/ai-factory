@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { ParametricModel, resolveLength } from "./parametric.js";
+import { analyzeClearance, transformBox, type ClearanceResult } from "./geometry.js";
 
 const positive = z.number().finite().positive();
 const nonNegative = z.number().finite().nonnegative();
@@ -74,6 +75,7 @@ export const AssemblyModel = z.object({
 
 export type AssemblyModel = z.infer<typeof AssemblyModel>;
 export type ManufacturabilityFinding = { severity: "error" | "warning"; code: string; message: string; partId?: string; fastenerId?: string; jointId?: string };
+export type AssemblyClearance = { partAId: string; partBId: string; result: ClearanceResult };
 
 function validateQuaternion(q: readonly number[], partId?: string) {
   const norm = Math.hypot(...q);
@@ -131,6 +133,27 @@ export function calculateAssemblyMassKg(input: unknown, models: Record<string, P
   return mass;
 }
 
+export function analyzeAssemblyClearances(input: unknown, models: Record<string, ParametricModel> = {}): AssemblyClearance[] {
+  const assembly = validateAssembly(input, models);
+  const boxes = new Map<string, ReturnType<typeof transformBox>>();
+  for (const part of assembly.parts) {
+    const model = models[part.model];
+    const envelope = model && modelEnvelope(model);
+    if (!envelope) continue;
+    boxes.set(part.id, transformBox({ min: [0, 0, 0], max: [envelope.width, envelope.depth, envelope.height] }, part.frame));
+  }
+  const results: AssemblyClearance[] = [];
+  for (let i = 0; i < assembly.parts.length; i++) for (let j = i + 1; j < assembly.parts.length; j++) {
+    const a = assembly.parts[i];
+    const b = assembly.parts[j];
+    const boxA = boxes.get(a.id);
+    const boxB = boxes.get(b.id);
+    if (!boxA || !boxB) continue;
+    results.push({ partAId: a.id, partBId: b.id, result: analyzeClearance(boxA, boxB) });
+  }
+  return results;
+}
+
 export function checkAssemblyManufacturability(input: unknown, models: Record<string, ParametricModel> = {}): ManufacturabilityFinding[] {
   const assembly = validateAssembly(input, models);
   const findings: ManufacturabilityFinding[] = [];
@@ -154,6 +177,7 @@ export function checkAssemblyManufacturability(input: unknown, models: Record<st
   }
   for (const fastener of assembly.fasteners) if (fastener.quantity > 1000) findings.push({ severity: "warning", code: "HIGH_FASTENER_COUNT", message: `Fastener ${fastener.id} has an unusually high quantity.`, fastenerId: fastener.id });
   for (const joint of assembly.joints) if (joint.lowerLimit !== undefined && joint.upperLimit !== undefined && joint.lowerLimit === joint.upperLimit && joint.type !== "fixed") findings.push({ severity: "warning", code: "ZERO_MOTION_RANGE", message: `Joint ${joint.id} has no permitted motion range.`, jointId: joint.id });
+  for (const clearance of analyzeAssemblyClearances(assembly, models)) if (clearance.result.intersects) findings.push({ severity: "error", code: "GEOMETRIC_INTERFERENCE", message: `Parts ${clearance.partAId} and ${clearance.partBId} have overlapping transformed bounding boxes.`, partId: clearance.partAId });
   return findings.sort((a, b) => `${a.code}:${a.partId ?? a.fastenerId ?? a.jointId ?? ""}`.localeCompare(`${b.code}:${b.partId ?? b.fastenerId ?? b.jointId ?? ""}`));
 }
 
