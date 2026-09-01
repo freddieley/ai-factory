@@ -44,6 +44,36 @@ CREATE TABLE IF NOT EXISTS approvals (
   created_at TEXT NOT NULL,
   resolved_at TEXT
 );
+CREATE TABLE IF NOT EXISTS requirements (
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL,
+  source TEXT NOT NULL,
+  key TEXT NOT NULL,
+  value TEXT NOT NULL,
+  unit TEXT,
+  required INTEGER NOT NULL DEFAULT 1,
+  status TEXT NOT NULL DEFAULT 'unverified',
+  created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS artifacts (
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL,
+  run_id TEXT,
+  kind TEXT NOT NULL,
+  name TEXT NOT NULL,
+  uri TEXT,
+  content_hash TEXT,
+  metadata TEXT NOT NULL DEFAULT '{}',
+  status TEXT NOT NULL DEFAULT 'created',
+  created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS artifact_links (
+  parent_artifact_id TEXT NOT NULL,
+  child_artifact_id TEXT NOT NULL,
+  relation TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  PRIMARY KEY (parent_artifact_id, child_artifact_id, relation)
+);
 `);
 
 export function createProject(name: string, description: string) {
@@ -64,9 +94,7 @@ export function finishRun(id: string, status: string, output: string) {
 export function addEvent(runId: string, type: string, payload: unknown) {
   db.prepare(`INSERT INTO events (id,run_id,type,payload,created_at) VALUES (?,?,?,?,?)`).run(randomUUID(), runId, type, JSON.stringify(payload), new Date().toISOString());
 }
-export function listEvents(runId: string) {
-  return db.prepare(`SELECT id,run_id,type,payload,created_at FROM events WHERE run_id=? ORDER BY created_at ASC`).all(runId);
-}
+export function listEvents(runId: string) { return db.prepare(`SELECT id,run_id,type,payload,created_at FROM events WHERE run_id=? ORDER BY created_at ASC`).all(); }
 export function getRun(id: string) { return db.prepare(`SELECT * FROM runs WHERE id=?`).get(id); }
 export function requestApproval(projectId: string, action: string, payload: unknown) {
   const id = randomUUID();
@@ -76,4 +104,23 @@ export function requestApproval(projectId: string, action: string, payload: unkn
 export function listApprovals(projectId?: string) {
   if (projectId) return db.prepare(`SELECT * FROM approvals WHERE project_id=? ORDER BY created_at DESC`).all(projectId);
   return db.prepare(`SELECT * FROM approvals ORDER BY created_at DESC`).all();
+}
+export function createRequirement(projectId: string, source: string, key: string, value: string, unit?: string, required = true) {
+  const id = randomUUID();
+  db.prepare(`INSERT INTO requirements (id,project_id,source,key,value,unit,required) VALUES (?,?,?,?,?,?,?)`).run(id, projectId, source, key, value, unit ?? null, required ? 1 : 0);
+  return id;
+}
+export function listRequirements(projectId: string) { return db.prepare(`SELECT * FROM requirements WHERE project_id=? ORDER BY created_at ASC`).all(projectId); }
+export function updateRequirementStatus(id: string, status: string) { db.prepare(`UPDATE requirements SET status=? WHERE id=?`).run(status, id); }
+export function createArtifact(projectId: string, runId: string | undefined, kind: string, name: string, uri?: string, contentHash?: string, metadata: unknown = {}) {
+  const id = randomUUID();
+  db.prepare(`INSERT INTO artifacts (id,project_id,run_id,kind,name,uri,content_hash,metadata) VALUES (?,?,?,?,?,?,?,?)`).run(id, projectId, runId ?? null, kind, name, uri ?? null, contentHash ?? null, JSON.stringify(metadata));
+  return id;
+}
+export function listArtifacts(projectId: string) { return db.prepare(`SELECT * FROM artifacts WHERE project_id=? ORDER BY created_at ASC`).all(projectId); }
+export function linkArtifacts(parentArtifactId: string, childArtifactId: string, relation: string) {
+  db.prepare(`INSERT OR IGNORE INTO artifact_links (parent_artifact_id,child_artifact_id,relation,created_at) VALUES (?,?,?,?)`).run(parentArtifactId, childArtifactId, relation, new Date().toISOString());
+}
+export function listArtifactLinks(projectId: string) {
+  return db.prepare(`SELECT al.* FROM artifact_links al JOIN artifacts p ON p.id=al.parent_artifact_id WHERE p.project_id=? ORDER BY al.created_at ASC`).all(projectId);
 }
