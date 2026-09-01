@@ -12,7 +12,7 @@ This is the execution queue for the factory. Work is complete only when implemen
 - [x] Supplier/component discovery — project-scoped suppliers, observed offers, availability/cost/lead-time data, provenance, freshness, procurement ranking, and explicit approved-source records.
 - [x] Change impact analysis and design review gates — downstream artifact traversal, requirement/artifact traceability, persistent impact analyses, blocking findings, and deterministic approval decisions.
 
-## Phase 2 — Autonomous CAD and mechanical design **[current]**
+## Phase 2 — Autonomous CAD and mechanical design **[complete]**
 - [x] Parametric design representation independent of a single CAD vendor — canonical metric model, named dimensional parameters, vendor-neutral mechanical features, validation, and deterministic serialization.
 - [x] CAD state snapshots, deterministic diffs, immutable revisions, hash-verified replay, revision-targeted rollback, and auditable rollback-as-new-revision semantics.
 - [x] Multi-part assembly foundation — stable parts, joints, fasteners, tolerances, materials, deterministic serialization, and baseline manufacturability findings.
@@ -22,8 +22,8 @@ This is the execution queue for the factory. Work is complete only when implemen
 - [x] Design-space exploration and constrained optimization — bounded deterministic candidate enumeration, constraint filtering, objective ranking, factory capability discovery, API execution, and persisted hash-verified exploration artifacts.
 - [x] Geometry/feature validation and regression tests against known designs.
 
-## Phase 3 — Electronics and embedded systems
-- [ ] Requirements-driven electronics architecture.
+## Phase 3 — Electronics and embedded systems **[current]**
+- [x] Requirements-driven electronics architecture — deterministic architecture synthesis from project electrical requirements, requirement traceability, power-domain extraction, functional blocks, interface identification, explicit open questions, capability discovery, API execution, hash-identified artifact persistence, and unit/API regression coverage.
 - [ ] Schematic and PCB design tool integration.
 - [ ] Component selection and electrical rule checking.
 - [ ] Power, thermal, signal-integrity, and interface analysis.
