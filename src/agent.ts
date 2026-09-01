@@ -4,8 +4,7 @@ import { addEvent, finishRun, createRun } from "./db.js";
 import { fusion } from "./fusion.js";
 import { getClient, providerInfo } from "./providers.js";
 import { ExecutionController, withTimeout } from "./execution.js";
-import { executeCreateBox, executeCreateCylinder, executeCreateMountingPlate, executeCreateEnclosure } from "./cad.js";
-import { executeCreatePlate } from "./plate.js";
+import { executeCapability, toOpenAITools } from "./capabilities.js";
 
 const SYSTEM = `
 You are AI Factory, a fast, disciplined autonomous engineering agent for civilian robotics, CAD, software, and physical product R&D.
@@ -14,7 +13,8 @@ Your job is to turn a user's plain-language project description into an executab
 
 Core architecture rules:
 - Treat the model as planner/orchestrator, not as the CAD kernel.
-- Prefer deterministic ai_factory_* tools over raw Fusion Python.
+- Prefer deterministic factory capabilities over raw Fusion Python.
+- The capability registry is the source of truth for deterministic factory operations; do not duplicate or invent tool definitions.
 - Never invent Fusion API code when a deterministic factory capability can satisfy the request.
 - Before executing geometry, reason about basic dimensional feasibility. Impossible geometry must be rejected before CAD execution.
 - Preserve user-specified dimensions and intent. Never silently change requested dimensions to make an impossible part fit.
@@ -25,13 +25,13 @@ Core architecture rules:
 - Never dispatch physical machinery or irreversible manufacturing jobs without explicit human approval. Fabrication should produce a proposal/approval request until the factory's safety and verification layer explicitly authorizes execution.
 - Keep routine tasks fast and tool arguments compact.
 
-Deterministic CAD tools:
+Deterministic factory capabilities currently available:
 - ai_factory_create_box: rectangular solid with widthMm, depthMm, heightMm.
 - ai_factory_create_cylinder: cylindrical solid with radiusMm and heightMm.
 - ai_factory_create_plate: rectangular plate with one verified through-hole. Parameters: widthMm, depthMm, heightMm, holeDiameterMm, optional holeXmm/holeYmm. Defaults hole center to plate center.
 - ai_factory_create_mounting_plate: rectangular base plate plus four cylindrical mounting posts in one new Fusion design.
 - ai_factory_create_enclosure: open-top rectangular electronics enclosure/tray with one base and four surrounding walls.
-- All deterministic CAD tools create and verify their result and report measured dimensions.
+- All deterministic CAD capabilities create and verify their result and report measured dimensions.
 - Use create_plate for plates with a through-hole. Do not write Fusion Python for this use case.
 - Use create_box for simple cuboids and solid plates without holes.
 - Use create_cylinder for shafts, pins, posts, spacers, and simple cylindrical solids.
@@ -53,16 +53,18 @@ Autonomy roadmap:
 
 type ToolCall = { id: string; type: "function"; function: { name: string; arguments: string } };
 
-const LOCAL_CAD_TOOLS: OpenAI.Chat.Completions.ChatCompletionTool[] = [
-  { type: "function", function: { name: "ai_factory_create_box", description: "Create and verify a rectangular solid in a new Fusion design.", parameters: { type: "object", additionalProperties: false, properties: { widthMm: { type: "number" }, depthMm: { type: "number" }, heightMm: { type: "number" } }, required: ["widthMm", "depthMm", "heightMm"] } } },
-  { type: "function", function: { name: "ai_factory_create_cylinder", description: "Create and verify a cylindrical solid in a new Fusion design.", parameters: { type: "object", additionalProperties: false, properties: { radiusMm: { type: "number" }, heightMm: { type: "number" } }, required: ["radiusMm", "heightMm"] } } },
-  { type: "function", function: { name: "ai_factory_create_plate", description: "Create and verify a rectangular plate with one through-hole in a new Fusion design. Hole center defaults to plate center.", parameters: { type: "object", additionalProperties: false, properties: { widthMm: { type: "number" }, depthMm: { type: "number" }, heightMm: { type: "number" }, holeDiameterMm: { type: "number" }, holeXmm: { type: "number" }, holeYmm: { type: "number" } }, required: ["widthMm", "depthMm", "heightMm", "holeDiameterMm"] } } },
-  { type: "function", function: { name: "ai_factory_create_mounting_plate", description: "Create and verify a rectangular mounting plate with four cylindrical corner posts in one new Fusion design.", parameters: { type: "object", additionalProperties: false, properties: { widthMm: { type: "number" }, depthMm: { type: "number" }, plateHeightMm: { type: "number" }, postRadiusMm: { type: "number" }, postHeightMm: { type: "number" }, insetMm: { type: "number" } }, required: ["widthMm", "depthMm", "plateHeightMm", "postRadiusMm", "postHeightMm", "insetMm"] } } },
-  { type: "function", function: { name: "ai_factory_create_enclosure", description: "Create and verify an open-top rectangular electronics enclosure/tray with one base and four surrounding walls.", parameters: { type: "object", additionalProperties: false, properties: { widthMm: { type: "number" }, depthMm: { type: "number" }, baseHeightMm: { type: "number" }, wallHeightMm: { type: "number" }, wallThicknessMm: { type: "number" } }, required: ["widthMm", "depthMm", "baseHeightMm", "wallHeightMm", "wallThicknessMm"] } } }
-];
-
 function mcpToolsAsOpenAI(): OpenAI.Chat.Completions.ChatCompletionTool[] {
-  return [...LOCAL_CAD_TOOLS, ...fusion.getTools().map((tool) => ({ type: "function" as const, function: { name: `fusion__${tool.name}`, description: tool.description ?? `Autodesk Fusion tool: ${tool.name}`, parameters: tool.inputSchema ?? { type: "object", properties: {} } } }))];
+  return [
+    ...toOpenAITools(),
+    ...fusion.getTools().map((tool) => ({
+      type: "function" as const,
+      function: {
+        name: `fusion__${tool.name}`,
+        description: tool.description ?? `Autodesk Fusion tool: ${tool.name}`,
+        parameters: tool.inputSchema ?? { type: "object", properties: {} }
+      }
+    }))
+  ];
 }
 
 function getFunctionToolCalls(toolCalls: OpenAI.Chat.Completions.ChatCompletionMessageToolCall[] | undefined): ToolCall[] {
@@ -135,15 +137,13 @@ export async function runAgent(projectId: string, prompt: string) {
         addEvent(runId, "tool.call", { step, toolName: rawName, args, call: controller.toolCalls });
         try {
           let result: unknown;
-          if (rawName === "ai_factory_create_box") result = await executeCreateBox(args);
-          else if (rawName === "ai_factory_create_cylinder") result = await executeCreateCylinder(args);
-          else if (rawName === "ai_factory_create_plate") result = await executeCreatePlate(args);
-          else if (rawName === "ai_factory_create_mounting_plate") result = await executeCreateMountingPlate(args);
-          else if (rawName === "ai_factory_create_enclosure") result = await executeCreateEnclosure(args);
-          else if (!rawName.startsWith("fusion__")) result = { error: "Unknown tool namespace." };
-          else {
+          if (rawName.startsWith("ai_factory_")) {
+            result = await executeCapability(rawName, args);
+          } else if (rawName.startsWith("fusion__")) {
             const toolName = rawName.slice("fusion__".length);
             result = await withTimeout(fusion.callTool(toolName, args), config.TOOL_TIMEOUT_MS, `Fusion tool ${toolName}`);
+          } else {
+            result = { error: "Unknown tool namespace." };
           }
           const content = unwrapMcpResult(result);
           addEvent(runId, "tool.result", { step, toolName: rawName, elapsedMs: Date.now() - toolStarted, result });
