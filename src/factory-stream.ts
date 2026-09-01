@@ -15,7 +15,7 @@ export function messageForCycleEvent(event:FactoryStreamEvent):string|null{
     case "tool.call": return `Using ${String(payload.toolName??"a factory tool")} to inspect or modify the design.`;
     case "tool.result": return `Factory tool completed: ${String(payload.toolName??"operation")}.`;
     case "tool.error": return `A factory tool reported an error: ${String(payload.error??"unknown error")}`;
-    case "factory.iteration.completed": return typeof payload.output==="string"&&payload.output.trim()?payload.output:"Engineering iteration completed; checking the verified result.";
+    case "factory.iteration.completed": return "Engineering iteration completed; checking the verified result.";
     case "factory.verification.completed": return "Deterministic verification completed.";
     case "factory.cycle.completed": return payload.status==="completed"?"Factory cycle completed successfully.":`Factory cycle finished with status: ${String(payload.status??"needs_review")}.`;
     case "factory.cycle.failed": return `Factory cycle failed. ${String(payload.error??"")}`;
