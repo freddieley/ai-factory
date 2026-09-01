@@ -76,6 +76,38 @@ CREATE TABLE IF NOT EXISTS artifact_links (
 );
 `);
 
+function tableColumns(table: string): Set<string> {
+  return new Set((db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>).map((column) => column.name));
+}
+
+function ensureColumn(table: string, column: string, definition: string) {
+  if (!tableColumns(table).has(column)) {
+    db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
+  }
+}
+
+// The kernel schema is intentionally forward-migrating. Older local databases
+// were created before requirements/artifacts became durable entities, so
+// CREATE TABLE IF NOT EXISTS alone is not sufficient when a developer upgrades.
+ensureColumn("requirements", "source", "TEXT NOT NULL DEFAULT 'unknown'");
+ensureColumn("requirements", "unit", "TEXT");
+ensureColumn("requirements", "required", "INTEGER NOT NULL DEFAULT 1");
+ensureColumn("requirements", "status", "TEXT NOT NULL DEFAULT 'unverified'");
+ensureColumn("requirements", "created_at", "TEXT NOT NULL DEFAULT ''");
+ensureColumn("artifacts", "run_id", "TEXT");
+ensureColumn("artifacts", "uri", "TEXT");
+ensureColumn("artifacts", "content_hash", "TEXT");
+ensureColumn("artifacts", "metadata", "TEXT NOT NULL DEFAULT '{}'");
+ensureColumn("artifacts", "status", "TEXT NOT NULL DEFAULT 'created'");
+ensureColumn("artifacts", "created_at", "TEXT NOT NULL DEFAULT ''");
+ensureColumn("artifact_links", "created_at", "TEXT NOT NULL DEFAULT ''");
+
+// Backfill timestamps introduced by the kernel migration. Empty strings are
+// only possible on legacy rows because all new writes use ISO timestamps.
+db.prepare(`UPDATE requirements SET created_at=? WHERE created_at=''`).run(new Date().toISOString());
+db.prepare(`UPDATE artifacts SET created_at=? WHERE created_at=''`).run(new Date().toISOString());
+db.prepare(`UPDATE artifact_links SET created_at=? WHERE created_at=''`).run(new Date().toISOString());
+
 export function createProject(name: string, description: string) {
   const id = randomUUID();
   db.prepare(`INSERT INTO projects (id,name,description,created_at) VALUES (?,?,?,?)`).run(id, name, description, new Date().toISOString());
@@ -107,14 +139,14 @@ export function listApprovals(projectId?: string) {
 }
 export function createRequirement(projectId: string, source: string, key: string, value: string, unit?: string, required = true) {
   const id = randomUUID();
-  db.prepare(`INSERT INTO requirements (id,project_id,source,key,value,unit,required) VALUES (?,?,?,?,?,?,?)`).run(id, projectId, source, key, value, unit ?? null, required ? 1 : 0);
+  db.prepare(`INSERT INTO requirements (id,project_id,source,key,value,unit,required,status,created_at) VALUES (?,?,?,?,?,?,?,?,?)`).run(id, projectId, source, key, value, unit ?? null, required ? 1 : 0, "unverified", new Date().toISOString());
   return id;
 }
 export function listRequirements(projectId: string) { return db.prepare(`SELECT * FROM requirements WHERE project_id=? ORDER BY created_at ASC`).all(projectId); }
 export function updateRequirementStatus(id: string, status: string) { db.prepare(`UPDATE requirements SET status=? WHERE id=?`).run(status, id); }
 export function createArtifact(projectId: string, runId: string | undefined, kind: string, name: string, uri?: string, contentHash?: string, metadata: unknown = {}) {
   const id = randomUUID();
-  db.prepare(`INSERT INTO artifacts (id,project_id,run_id,kind,name,uri,content_hash,metadata) VALUES (?,?,?,?,?,?,?,?)`).run(id, projectId, runId ?? null, kind, name, uri ?? null, contentHash ?? null, JSON.stringify(metadata));
+  db.prepare(`INSERT INTO artifacts (id,project_id,run_id,kind,name,uri,content_hash,metadata,status,created_at) VALUES (?,?,?,?,?,?,?,?,?,?)`).run(id, projectId, runId ?? null, kind, name, uri ?? null, contentHash ?? null, JSON.stringify(metadata), "created", new Date().toISOString());
   return id;
 }
 export function listArtifacts(projectId: string) { return db.prepare(`SELECT * FROM artifacts WHERE project_id=? ORDER BY created_at ASC`).all(projectId); }
