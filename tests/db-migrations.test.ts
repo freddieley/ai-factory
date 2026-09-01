@@ -5,19 +5,24 @@ import { db, getSchemaVersion, listSchemaMigrations } from "../src/db.js";
 
 describe("database schema migrations", () => {
   it("records the current schema version and migration history", () => {
-    expect(getSchemaVersion()).toBe(2);
+    expect(getSchemaVersion()).toBe(3);
     expect(listSchemaMigrations()).toEqual([
       expect.objectContaining({ version: 1, name: "initial-factory-schema" }),
       expect.objectContaining({ version: 2, name: "repair-legacy-factory-schema" }),
+      expect.objectContaining({ version: 3, name: "engineering-and-work-order-schema" }),
     ]);
   });
 
-  it("exposes the lineage and timestamp columns required by the factory graph", () => {
+  it("exposes the complete factory persistence schema", () => {
+    const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all() as Array<{name:string}>;
+    expect(tables.map(table => table.name)).toEqual(expect.arrayContaining([
+      "projects", "runs", "events", "approvals", "requirements", "artifacts", "artifact_links",
+      "engineering_requirements", "engineering_plans", "fusion_links", "verification_records", "work_orders", "schema_migrations",
+    ]));
     const requirements = db.prepare("PRAGMA table_info(requirements)").all() as Array<{ name: string }>;
     const artifacts = db.prepare("PRAGMA table_info(artifacts)").all() as Array<{ name: string }>;
     expect(requirements.map(column => column.name)).toEqual(expect.arrayContaining(["source", "key", "value", "created_at", "updated_at"]));
     expect(artifacts.map(column => column.name)).toEqual(expect.arrayContaining(["run_id", "parent_artifact_id", "metadata", "created_at"]));
-    expect(db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='artifact_links'").get()).toBeTruthy();
   });
 
   it("repairs a legacy database that incorrectly claims version 1", () => {
@@ -28,14 +33,12 @@ describe("database schema migrations", () => {
       CREATE TABLE artifacts (id TEXT PRIMARY KEY, project_id TEXT NOT NULL);
       INSERT INTO schema_migrations VALUES (1, 'initial-factory-schema', '2026-01-01T00:00:00.000Z');
     `);
-
     applyMigrations(legacy);
-
     const requirementColumns = legacy.prepare("PRAGMA table_info(requirements)").all() as Array<{ name: string }>;
     const artifactColumns = legacy.prepare("PRAGMA table_info(artifacts)").all() as Array<{ name: string }>;
     expect(requirementColumns.map(column => column.name)).toEqual(expect.arrayContaining(["source", "key", "value", "created_at", "updated_at"]));
     expect(artifactColumns.map(column => column.name)).toEqual(expect.arrayContaining(["run_id", "parent_artifact_id", "metadata", "created_at"]));
-    expect(legacy.prepare("SELECT version FROM schema_migrations ORDER BY version").all()).toEqual([{ version: 1 }, { version: 2 }]);
+    expect(legacy.prepare("SELECT version FROM schema_migrations ORDER BY version").all()).toEqual([{version:1},{version:2},{version:3}]);
     legacy.close();
   });
 });
