@@ -13,9 +13,11 @@ describe("factory capability registry", () => {
   });
 
   it("supports domain discovery without exposing non-CAD capabilities prematurely", () => {
-    expect(listCapabilities("cad").length).toBe(capabilities.length);
+    expect(listCapabilities("cad")).toHaveLength(5);
+    expect(listCapabilities("cad").length).toBeLessThan(capabilities.length);
     expect(listCapabilities("software")).toHaveLength(0);
     expect(getCapability("ai_factory_create_plate")?.domain).toBe("cad");
+    expect(getCapability("ai_factory_plan_parametric_box")?.domain).toBe("mechanics");
   });
 
   it("rejects unknown capability execution before touching any external system", async () => {
