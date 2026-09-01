@@ -65,6 +65,6 @@ export function registerDesignSpaceRoutes(app: FastifyInstance): void {
   app.get("/api/projects/:id/design-space/explorations", async (request, reply) => {
     const { id } = request.params as { id: string };
     if (!getProject(id)) return reply.code(404).send({ error: "project not found" });
-    return listArtifacts(id).filter((artifact: { kind?: string }) => artifact.kind === "design_space_exploration");
+    return listArtifacts(id).filter(artifact => (artifact as { kind?: string }).kind === "design_space_exploration");
   });
 }
