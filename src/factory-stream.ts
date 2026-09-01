@@ -1,14 +1,11 @@
 export type FactoryStreamEvent={id:string;type:string;payload:string;created_at:string};
-
 function payloadOf(event:FactoryStreamEvent):Record<string,unknown>{try{return JSON.parse(event.payload) as Record<string,unknown>;}catch{return {};}}
-
 function toolMessage(toolName:string):string{
   if(toolName==="ai_factory_inspect_fusion") return `Inspecting the current Fusion document (${toolName}).`;
   if(toolName.startsWith("ai_factory_create_")) return `Creating ${toolName.replace("ai_factory_create_","").replaceAll("_"," ")} (${toolName}).`;
   if(toolName.startsWith("ai_factory_")) return `Running ${toolName.replace("ai_factory_","").replaceAll("_"," ")} (${toolName}).`;
   return `Running factory tool ${toolName}.`;
 }
-
 export function messageForCycleEvent(event:FactoryStreamEvent):string|null{
   const payload=payloadOf(event);
   switch(event.type){
@@ -18,7 +15,7 @@ export function messageForCycleEvent(event:FactoryStreamEvent):string|null{
     case "factory.planning.failed": return `I couldn’t complete the engineering plan. ${String(payload.error??"Please review the cycle details.")}`;
     case "factory.iteration.started": return `Working through engineering iteration ${String(payload.iteration??"")}…`;
     case "model.start": return `Processing engineering step ${String(payload.step??"")}…`;
-    case "model.message": return typeof payload.content==="string"&&payload.content.trim()?payload.content:null;
+    case "model.message": return null;
     case "tool.call": return toolMessage(String(payload.toolName??"a factory tool"));
     case "tool.result": return `Completed ${String(payload.toolName??"factory operation")}.`;
     case "tool.error": return `A factory tool reported an error: ${String(payload.error??"unknown error")}`;
@@ -33,8 +30,4 @@ export function messageForCycleEvent(event:FactoryStreamEvent):string|null{
     default: return null;
   }
 }
-
-export function sse(event:string,data:unknown):string{
-  const serialized=JSON.stringify(data).replace(/\r?\n/g,"\\n");
-  return `event: ${event}\ndata: ${serialized}\n\n`;
-}
+export function sse(event:string,data:unknown):string{const serialized=JSON.stringify(data).replace(/\r?\n/g,"\\n");return `event: ${event}\ndata: ${serialized}\n\n`;}
