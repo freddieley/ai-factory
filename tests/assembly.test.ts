@@ -53,7 +53,8 @@ describe("vendor-neutral mechanical assemblies", () => {
   });
 
   it("detects process/material incompatibility and capability violations", () => {
-    const findings = checkAssemblyManufacturability({ ...base, parts: [{ ...base.parts[0], material: { material: "carbon-fiber", densityKgM3: 1600, supportedProcesses: ["layup"] }, process: "cnc", tolerances: [{ parameter: "height", plusMm: 0.01, minusMm: 0.01 }] }] }, models);
+    const standalone = { ...base, joints: [], fasteners: [], parts: [{ ...base.parts[0], material: { material: "carbon-fiber", densityKgM3: 1600, supportedProcesses: ["layup"] }, process: "cnc", tolerances: [{ parameter: "height", plusMm: 0.01, minusMm: 0.01 }] }] };
+    const findings = checkAssemblyManufacturability(standalone, models);
     expect(findings.map(f => f.code)).toContain("MATERIAL_PROCESS_INCOMPATIBLE");
     expect(findings.map(f => f.code)).toContain("PROCESS_TOLERANCE_EXCEEDED");
   });
