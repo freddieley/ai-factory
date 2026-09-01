@@ -40,8 +40,9 @@ describe("vendor-neutral mechanical assemblies", () => {
   });
 
   it("calculates mass from explicit material density and box geometry", () => {
-    expect(calculateAssemblyMassKg({ ...base, parts: [base.parts[0]] }, models)).toBeCloseTo(0.27, 6);
-    expect(calculateAssemblyMassKg({ ...base, parts: [{ ...base.parts[0], material: undefined }] }, models)).toBeUndefined();
+    const standalone = { ...base, parts: [base.parts[0]], joints: [], fasteners: [] };
+    expect(calculateAssemblyMassKg(standalone, models)).toBeCloseTo(0.27, 6);
+    expect(calculateAssemblyMassKg({ ...standalone, parts: [{ ...base.parts[0], material: undefined }] }, models)).toBeUndefined();
   });
 
   it("detects process/material incompatibility and capability violations", () => {
