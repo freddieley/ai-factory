@@ -38,9 +38,6 @@ function parameterMap(model: ParametricModel) {
   return new Map(model.parameters.map(parameter => [parameter.name, parameter.valueMm]));
 }
 
-/** Resolve a scalar parameter reference. Literals are deliberately supported
- * so adapters can preserve vendor-independent expressions without introducing
- * a CAD-specific expression language. */
 export function resolveLength(model: ParametricModel, expression: string): number {
   const literal = Number(expression);
   if (Number.isFinite(literal) && literal > 0) return literal;
@@ -77,5 +74,7 @@ export function createParametricBox(name: string, widthMm: number, depthMm: numb
 
 export function canonicalParametricJson(model: ParametricModel): string {
   const normalized = validateParametricModel(model);
-  return JSON.stringify(normalized);
+  const parameters = [...normalized.parameters].sort((a, b) => a.name.localeCompare(b.name));
+  const features = [...normalized.features].sort((a, b) => a.name.localeCompare(b.name));
+  return JSON.stringify({ ...normalized, parameters, features });
 }
