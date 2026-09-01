@@ -25,4 +25,8 @@ export function messageForCycleEvent(event:FactoryStreamEvent):string|null{
   }
 }
 
-export function sse(event:string,data:unknown):string{return `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;}
+/** Serialize an SSE frame while keeping the data field single-line. */
+export function sse(event:string,data:unknown):string{
+  const serialized=JSON.stringify(data).replace(/\r?\n/g,"\\n");
+  return `event: ${event}\ndata: ${serialized}\n\n`;
+}
