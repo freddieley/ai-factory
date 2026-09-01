@@ -1,6 +1,6 @@
 import Fastify, { FastifyReply } from "fastify";
 import { config } from "./config.js";
-import { createProject, getProject, getRun, listEvents, listProjects, listApprovals, createRequirement, getRequirement, listRequirements, updateRequirementStatus, createArtifact, listArtifacts, listArtifactLinks, getFactoryCycle, listFactoryCycles, listCycleEvents } from "./db.js";
+import { createProject, getProject, getRun, listEvents, listProjects, listApprovals, createRequirement, getRequirement, listRequirements, updateRequirementStatus, createArtifact, listArtifacts, listArtifactLinks, linkArtifacts, getFactoryCycle, listFactoryCycles, listCycleEvents } from "./db.js";
 import { providerInfo } from "./providers.js";
 import { fusion } from "./fusion.js";
 import { runAgent } from "./agent.js";
