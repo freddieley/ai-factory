@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { transformPoint, type Point3, type Transform } from "./geometry.js";
-import { type ParametricModel } from "./parametric.js";
+import { type ParametricModel, resolveLength } from "./parametric.js";
 import { type AssemblyModel, validateAssembly } from "./assembly.js";
 
 const finite = z.number().finite();
@@ -117,11 +117,10 @@ export function validateDatumScheme(input: unknown): DatumReference[] {
     const normal = normalize(datum.normal, `Datum ${datum.id} normal`);
     const xDirection = normalize(datum.xDirection, `Datum ${datum.id} xDirection`);
     if (Math.abs(dot(normal, xDirection)) > 1e-6) throw new Error(`Datum ${datum.id} normal and xDirection must be perpendicular`);
-    const yDirection = cross(normal, xDirection);
-    if (magnitude(yDirection) < 1e-6) throw new Error(`Datum ${datum.id} frame is degenerate`);
+    if (magnitude(cross(normal, xDirection)) < 1e-6) throw new Error(`Datum ${datum.id} frame is degenerate`);
   }
   const roleOrder = ["primary", "secondary", "tertiary"] as const;
-  for (let i = 0; i < roles.size; i++) if (!roles.has(roleOrder[i])) throw new Error(`Datum scheme must be contiguous from primary through tertiary`);
+  for (let i = 0; i < roles.size; i++) if (!roles.has(roleOrder[i])) throw new Error("Datum scheme must be contiguous from primary through tertiary");
   return datums.map(datum => ({ ...datum, normal: normalize(datum.normal, `Datum ${datum.id} normal`), xDirection: normalize(datum.xDirection, `Datum ${datum.id} xDirection`) }));
 }
 
@@ -152,13 +151,13 @@ export function analyzeFits(inputs: unknown): FitAnalysis[] {
 }
 
 export function checkMachineCapability(part: { id: string; process?: string; material?: { material: string }; model: string }, model: ParametricModel | undefined, capability: MachineCapability): MechanicalFinding[] {
+  if (part.process !== capability.process) return [];
   const findings: MechanicalFinding[] = [];
-  if (part.process !== capability.process) return findings;
   if (!capability.materials.includes(part.material?.material ?? "")) findings.push({ severity: "error", code: "MACHINE_MATERIAL_UNSUPPORTED", message: `Machine ${capability.machineId} does not declare support for material ${part.material?.material ?? "unknown"}.`, evidenceIds: capability.evidenceIds, partId: part.id, machineId: capability.machineId });
   const box = model?.features.find(feature => feature.type === "box");
-  if (box && capability.maxPartMm !== undefined) {
-    const dimensions = [Number(box.width), Number(box.depth), Number(box.height)];
-    if (dimensions.some(value => !Number.isFinite(value) || value <= 0 || value > capability.maxPartMm!)) findings.push({ severity: "error", code: "MACHINE_ENVELOPE_EXCEEDED", message: `Part ${part.id} exceeds machine ${capability.machineId} envelope.`, evidenceIds: capability.evidenceIds, partId: part.id, machineId: capability.machineId });
+  if (box && capability.maxPartMm !== undefined && model) {
+    const dimensions = [resolveLength(model, box.width), resolveLength(model, box.depth), resolveLength(model, box.height)];
+    if (dimensions.some(value => value > capability.maxPartMm!)) findings.push({ severity: "error", code: "MACHINE_ENVELOPE_EXCEEDED", message: `Part ${part.id} exceeds machine ${capability.machineId} envelope.`, evidenceIds: capability.evidenceIds, partId: part.id, machineId: capability.machineId });
   }
   return findings;
 }
@@ -182,46 +181,4 @@ export function checkMechanicalConstraints(input: MechanicalConstraintModel, mod
     if (material && material.supportedProcesses.length && part.process && !material.supportedProcesses.includes(part.process)) findings.push({ severity: "error", code: "MATERIAL_PROCESS_INCOMPATIBLE", message: `Material ${material.name} is not declared compatible with ${part.process}.`, evidenceIds: material.evidenceIds, partId: part.id });
   }
   return findings.sort((a, b) => `${a.code}:${a.partId ?? a.fitId ?? a.machineId ?? ""}`.localeCompare(`${b.code}:${b.partId ?? b.fitId ?? b.machineId ?? ""}`));
-}
-
-export function transformDatumPoint(point: Point3, datum: DatumReference, transform: Transform): Point3 {
-  const transformed = transformDatum(datum, transform);
-  return transformPoint(point, transformDatumTransform(transformed));
-}
-
-function transformDatumTransform(datum: DatumReference): Transform {
-  const z = normalize(datum.normal, `Datum ${datum.id} normal`);
-  const x = normalize(datum.xDirection, `Datum ${datum.id} xDirection`);
-  const y = normalize(cross(z, x), `Datum ${datum.id} yDirection`);
-  const matrixTrace = x[0] + y[1] + z[2];
-  let qw: number;
-  let qx: number;
-  let qy: number;
-  let qz: number;
-  if (matrixTrace > 0) {
-    const s = Math.sqrt(matrixTrace + 1) * 2;
-    qw = 0.25 * s;
-    qx = (y[2] - z[1]) / s;
-    qy = (z[0] - x[2]) / s;
-    qz = (x[1] - y[0]) / s;
-  } else if (x[0] > y[1] && x[0] > z[2]) {
-    const s = Math.sqrt(1 + x[0] - y[1] - z[2]) * 2;
-    qw = (y[2] - z[1]) / s;
-    qx = 0.25 * s;
-    qy = (y[0] + x[1]) / s;
-    qz = (z[0] + x[2]) / s;
-  } else if (y[1] > z[2]) {
-    const s = Math.sqrt(1 + y[1] - x[0] - z[2]) * 2;
-    qw = (z[0] - x[2]) / s;
-    qx = (y[0] + x[1]) / s;
-    qy = 0.25 * s;
-    qz = (z[1] + y[2]) / s;
-  } else {
-    const s = Math.sqrt(1 + z[2] - x[0] - y[1]) * 2;
-    qw = (x[1] - y[0]) / s;
-    qx = (z[0] + x[2]) / s;
-    qy = (z[1] + y[2]) / s;
-    qz = 0.25 * s;
-  }
-  return { originMm: datum.originMm, rotationQuat: [qx, qy, qz, qw] };
 }
