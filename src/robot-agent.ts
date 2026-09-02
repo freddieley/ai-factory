@@ -48,6 +48,27 @@ function buildRetryPrompt(originalPrompt: string, error: string, attempt: number
   return `Build request:\n${originalPrompt}\n\nThis is correction attempt ${attempt}. The deterministic factory rejected the prior submission. Fix the evidence below instead of repeating the prior structure.\n\nREJECTION EVIDENCE:\n${error}\n\nHard contract reminders:\n- Return exactly one complete JSON object.\n- inputs contains strings only.\n- designRationale and unresolvedQuestions are arrays of strings.\n- joints use parentPartId, childPartId, and type; otherwise use joints: [].\n- Do not nest arbitrary operation arrays inside parameters.\n- outputOperationId must exist for every part.\n- Keep geometry physically sensible and place repeated parts distinctly.\n\nReturn ONLY the corrected JSON object.`;
 }
 
+async function requestRobotModel(client: any, model: string, temperature: number, messages: any[], signal: AbortSignal): Promise<any> {
+  try {
+    return await client.chat.completions.create({
+      model,
+      temperature,
+      max_tokens: 7000,
+      messages,
+      response_format: { type: "json_object" },
+    }, { signal });
+  } catch (error) {
+    const message = String(error);
+    if (!/response.?format|json_object|unsupported|not supported/i.test(message)) throw error;
+    return await client.chat.completions.create({
+      model,
+      temperature,
+      max_tokens: 7000,
+      messages,
+    }, { signal });
+  }
+}
+
 export async function runRobotAgent({ projectId, prompt, cycleId, runId, client, info }: RobotAgentArgs) {
   try {
     await withTimeout(fusion.connect(), config.TOOL_TIMEOUT_MS, "Fusion connection");
@@ -75,13 +96,7 @@ export async function runRobotAgent({ projectId, prompt, cycleId, runId, client,
       try {
         const timeoutMs = Math.min(Math.max(config.MODEL_TIMEOUT_MS, 120_000), 180_000);
         response = await withAbortTimeout(
-          signal => client.chat.completions.create({
-            model: info.model,
-            temperature: attempt === 1 ? config.TEMPERATURE : 0,
-            max_tokens: 7000,
-            messages: modelMessages,
-            response_format: { type: "json_object" },
-          }, { signal }),
+          signal => requestRobotModel(client, info.model, attempt === 1 ? config.TEMPERATURE : 0, modelMessages, signal),
           timeoutMs,
           "Robot design model request",
         );
