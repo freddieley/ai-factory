@@ -27,6 +27,7 @@ describe("electronics engineering analysis", () => {
   it("passes when power, thermal, signal and interface data are complete", () => {
     const architecture = makeArchitecture();
     const selection = makeSelection();
+    expect(architecture.functionalBlocks.some(block => block.type === "other")).toBe(true);
     expect(selection.ruleCheck.status).toBe("pass");
     const analysis = analyzeElectronicsEngineering(architecture, selection);
     expect(analysis.status).toBe("pass");
