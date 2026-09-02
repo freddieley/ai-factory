@@ -1,8 +1,10 @@
 # AI Factory
 
-A local-first AI engineering control plane for civilian robotics: **plain-language request → requirements → engineering plan → CAD → simulation → verification → manufacturing → physical testing → autonomous iteration → release**.
+A local-first AI engineering control plane for civilian robotics: **plain-language request → requirements → engineering plan → model-authored robot design → CAD → electronics → simulation → verification → manufacturing → physical testing → autonomous iteration → release**.
 
 The repository is deliberately being built as a staged autonomy stack. The current system can plan and execute bounded CAD workflows, persist engineering state, and keep consequential physical operations behind explicit approval. The long-term target is a locally operated research-and-development factory capable of taking a sufficiently specified product request and coordinating the software, hardware, simulation, manufacturing, testing, and iteration required to produce a real-world robot or drone.
+
+**The model is the designer; the factory is the verifier/executor.** Model-facing tools are not a catalog of robot templates. Legacy box/plate/enclosure helpers remain only as internal compatibility adapters and are hidden from model tool discovery. The model-facing `ai_factory_submit_robot_design` contract accepts arbitrary part topology, joints, and a vendor-neutral CAD operation graph, so a future local model can invent the robot architecture rather than selecting a premade structure. Cloud models can use the same contract during development, with the eventual specialised/local model becoming a drop-in design generator.
 
 See **[GOAL.md](./GOAL.md)** for the complete end-state specification and design principles. Treat the roadmap below as the canonical development queue: when continuing development, finish the current phase completely—including implementation, tests, documentation, migrations, diagnostics, and CI—before moving forward.
 
@@ -24,7 +26,7 @@ See **[GOAL.md](./GOAL.md)** for the complete end-state specification and design
 - [ ] Firmware generation, build, flashing, logging, and hardware-in-the-loop interfaces.
 - [ ] Electronics BOM, substitutions, lifecycle and procurement integration.
 
-A concrete benign quadrotor flight-controller reference specification now exists in `src/drone-reference.ts`, using the same requirements-driven electronics architecture pipeline rather than a disconnected demo path.
+A concrete quadrotor reference remains available in `src/drone-reference.ts` as a regression/engineering fixture, not as a model-facing robot template or design capability.
 
 ### Phase 4 — Robotics software factory
 - [ ] Generate robot software architecture from the same product specification.
