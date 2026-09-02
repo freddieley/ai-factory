@@ -2,7 +2,7 @@ import type { FastifyInstance } from "fastify";
 import { createHash } from "node:crypto";
 import { getProject, listArtifacts, createArtifact } from "./db.js";
 import { listRequirements } from "./engineering-db.js";
-import { buildRequirementsDrivenElectronicsArchitecture } from "./electronics.js";
+import { ElectronicsRequirement, buildRequirementsDrivenElectronicsArchitecture } from "./electronics.js";
 
 export function registerElectronicsRoutes(app: FastifyInstance): void {
   app.post("/api/projects/:id/electronics/architecture", async (request, reply) => {
@@ -10,15 +10,15 @@ export function registerElectronicsRoutes(app: FastifyInstance): void {
     if (!getProject(id)) return reply.code(404).send({ error: "project not found" });
 
     try {
-      const electricalRequirements = (listRequirements(id) as Array<Record<string, unknown>>)
-        .filter(requirement => requirement.category === "electrical")
-        .map(requirement => ({
-          id: String(requirement.id),
-          description: String(requirement.description),
-          value: requirement.value === undefined ? null : requirement.value as string | number | null,
-          unit: requirement.unit === undefined ? null : requirement.unit as string | null,
-          priority: String(requirement.priority ?? "should") as "must" | "should" | "could",
-          verificationMethod: requirement.verification_method === undefined ? null : String(requirement.verification_method),
+      const electricalRequirements = listRequirements(id)
+        .filter(requirement => String((requirement as { category?: unknown }).category ?? "").toLowerCase() === "electrical")
+        .map(requirement => ElectronicsRequirement.parse({
+          id: String((requirement as { id: unknown }).id),
+          description: String((requirement as { description: unknown }).description),
+          value: (requirement as { value?: unknown }).value === undefined ? null : (requirement as { value?: unknown }).value as string | number | null,
+          unit: (requirement as { unit?: unknown }).unit === undefined ? null : String((requirement as { unit?: unknown }).unit),
+          priority: String((requirement as { priority?: unknown }).priority ?? "should"),
+          verificationMethod: (requirement as { verification_method?: unknown }).verification_method == null ? null : String((requirement as { verification_method?: unknown }).verification_method),
         }));
       if (electricalRequirements.length === 0) return reply.code(400).send({ error: "project has no electrical requirements" });
 
