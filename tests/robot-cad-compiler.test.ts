@@ -73,6 +73,20 @@ describe("robot CAD compiler", () => {
     expect(result.script).toContain("2.5");
   });
 
+  it("compiles model-generated nested sketch profiles instead of rejecting the whole design", () => {
+    const result = compileRobotDesignToFusionScript({ ...design, parts: [{ ...design.parts[0], geometry: { ...design.parts[0].geometry, operations: [
+      { id: "sk", op: "sketch", inputs: [], parameters: { operations: [
+        { id: "arm", op: "rectangle", inputs: [], parameters: { widthMm: 300, heightMm: 15, centerX: 0, centerY: 0, rotationDeg: 45 } },
+        { id: "hub", op: "circle", inputs: [], parameters: { radiusMm: 30, centerX: 0, centerY: 0 } },
+      ] } },
+      { id: "solid", op: "extrude", inputs: ["sk"], parameters: { distanceMm: 2 } },
+    ], outputOperationId: "solid" } }] });
+    expect(result.unsupportedOperations).toEqual([]);
+    expect(result.script).toContain("Point3D.create");
+    expect(result.script).toContain("sketchCircles.addByCenterRadius");
+    expect(result.script).toContain("distanceMm");
+  });
+
   it("rejects disconnected geometry operations instead of executing geometry that is not part of the output", () => {
     expect(() => compileRobotDesignToFusionScript({ ...design, parts: [{ ...design.parts[0], geometry: { ...design.parts[0].geometry, operations: [
       { id: "sk", op: "sketch", inputs: [], parameters: {} },
