@@ -2,13 +2,19 @@ import { createHash } from "node:crypto";
 import { z } from "zod";
 import { ElectronicsArchitecture } from "./electronics.js";
 
-const Scalar = z.union([z.string(), z.number(), z.boolean()]);
+const ParameterValue: z.ZodType<unknown> = z.lazy(() => z.union([
+  z.string(),
+  z.number(),
+  z.boolean(),
+  z.array(ParameterValue),
+  z.record(z.string(), ParameterValue),
+]));
 
 export const RobotGeometryOperation = z.object({
   id: z.string().regex(/^[A-Za-z][A-Za-z0-9_-]*$/),
   op: z.enum(["sketch","line","arc","circle","rectangle","polygon","spline","extrude","revolve","loft","sweep","boolean_union","boolean_cut","boolean_intersect","fillet","chamfer","shell","pattern","transform","mirror","datum"]),
   inputs: z.array(z.string().min(1)).default([]),
-  parameters: z.record(z.string(), Scalar).default({}),
+  parameters: z.record(z.string(), ParameterValue).default({}),
 });
 export type RobotGeometryOperation = z.infer<typeof RobotGeometryOperation>;
 
@@ -19,7 +25,7 @@ export const RobotPart = z.object({
 });
 export type RobotPart = z.infer<typeof RobotPart>;
 
-export const RobotJoint = z.object({ id: z.string().min(1), parentPartId: z.string().min(1), childPartId: z.string().min(1), type: z.enum(["fixed","revolute","prismatic","spherical","planar"]), parameters: z.record(z.string(), Scalar).default({}) });
+export const RobotJoint = z.object({ id: z.string().min(1), parentPartId: z.string().min(1), childPartId: z.string().min(1), type: z.enum(["fixed","revolute","prismatic","spherical","planar"]), parameters: z.record(z.string(), ParameterValue).default({}) });
 
 export const RobotDesign = z.object({
   schema: z.literal("ai-factory.robot-design/v1"), name: z.string().min(1), mission: z.string().min(1),
@@ -88,6 +94,15 @@ function normalizeScalarParameters(parameters: Record<string, unknown>): Record<
   return normalized;
 }
 
+function normalizeOperationInputs(inputs: unknown): unknown[] {
+  if (!Array.isArray(inputs)) return [];
+  return inputs.flatMap(input => {
+    if (typeof input === "string") return [input];
+    if (input && typeof input === "object" && !Array.isArray(input) && typeof (input as Record<string, unknown>).id === "string") return [String((input as Record<string, unknown>).id)];
+    return [];
+  });
+}
+
 function transportVariants(text: string): string[] {
   const variants = new Set<string>([text]);
   const add = (candidate: string) => { if (candidate && candidate !== text) variants.add(candidate); };
@@ -151,7 +166,11 @@ function normalizeRobotDesignInput(input: unknown): unknown {
     const operations = Array.isArray(g.operations) ? g.operations.map(rawOp => {
       if (!rawOp || typeof rawOp !== "object" || Array.isArray(rawOp)) return rawOp;
       const op = rawOp as Record<string, unknown>;
-      return { ...op, parameters: normalizeScalarParameters((op.parameters && typeof op.parameters === "object" && !Array.isArray(op.parameters)) ? op.parameters as Record<string, unknown> : {}) };
+      return {
+        ...op,
+        inputs: normalizeOperationInputs(op.inputs),
+        parameters: normalizeScalarParameters((op.parameters && typeof op.parameters === "object" && !Array.isArray(op.parameters)) ? op.parameters as Record<string, unknown> : {}),
+      };
     }) : g.operations;
     return { ...part, geometry: { ...g, operations } };
   }) : source.parts;
@@ -170,12 +189,28 @@ function normalizeRobotDesignInput(input: unknown): unknown {
     }
     return [{ ...joint, id, parentPartId, childPartId, type }];
   }) : source.joints;
-  const designRationale = Array.isArray(source.designRationale) ? source.designRationale.map(item => {
-    if (typeof item === "string") return item;
-    if (item && typeof item === "object" && !Array.isArray(item) && typeof (item as Record<string, unknown>).description === "string") return String((item as Record<string, unknown>).description);
-    return String(item);
-  }) : source.designRationale;
-  const unresolvedQuestions = Array.isArray(source.unresolvedQuestions) ? source.unresolvedQuestions.map(String) : [];
+  const designRationale = Array.isArray(source.designRationale)
+    ? source.designRationale.map(item => {
+        if (typeof item === "string") return item;
+        if (item && typeof item === "object" && !Array.isArray(item) && typeof (item as Record<string, unknown>).description === "string") return String((item as Record<string, unknown>).description);
+        return String(item);
+      })
+    : typeof source.designRationale === "string"
+      ? [source.designRationale]
+      : source.designRationale;
+  const unresolvedQuestions = Array.isArray(source.unresolvedQuestions)
+    ? source.unresolvedQuestions.map(item => {
+        if (typeof item === "string") return item;
+        if (item && typeof item === "object" && !Array.isArray(item)) {
+          const candidate = item as Record<string, unknown>;
+          if (typeof candidate.question === "string" && typeof candidate.assumption === "string") return `${candidate.question} Assumption: ${candidate.assumption}`;
+          if (typeof candidate.question === "string") return candidate.question;
+        }
+        return String(item);
+      })
+    : typeof source.unresolvedQuestions === "string"
+      ? [source.unresolvedQuestions]
+      : [];
   return { ...source, parts, joints, designRationale, unresolvedQuestions: [...unresolvedQuestions, ...normalizationNotes] };
 }
 
