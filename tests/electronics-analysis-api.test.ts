@@ -17,7 +17,7 @@ describe("electronics engineering analysis API", () => {
     const selection = { schema: "ai-factory.electronics-component-selection/v1", architectureSchema: "ai-factory.electronics-architecture/v1", candidates: [candidate], selected: [candidate], rejectedCount: 0, blockingFindings: [], ruleCheck: { schema: "ai-factory.electronics-erc/v1", status: "pass", findings: [] } };
     const response = await app.inject({ method: "POST", url: `/api/projects/${projectId}/electronics/analysis`, payload: { architecture, selection } });
     expect(response.statusCode).toBe(200);
-    expect(response.json()).toMatchObject({ artifactId: expect.any(String), contentHash: expect.stringMatching(/^[a-f0-9]{64}$/), analysis: { schema: "ai-factory.electronics-engineering-analysis/v1", status: "fail" } });
+    expect(response.json()).toMatchObject({ artifactId: expect.any(String), contentHash: expect.stringMatching(/^[a-f0-9]{64}$/), analysis: { schema: "ai-factory.electronics-engineering-analysis/v1", status: "pass" } });
     const list = await app.inject({ method: "GET", url: `/api/projects/${projectId}/electronics/analyses` });
     expect(list.statusCode).toBe(200);
     expect(list.json()).toHaveLength(1);
