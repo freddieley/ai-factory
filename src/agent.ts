@@ -1,21 +1,190 @@
 import OpenAI from "openai";
 import { config } from "./config.js";
-import { addEvent,finishRun,createRun } from "./db.js";
+import { addEvent, finishRun, createRun } from "./db.js";
 import { fusion } from "./fusion.js";
-import { providerInfo,getClient } from "./providers.js";
-import { ExecutionController,withAbortTimeout,withTimeout } from "./execution.js";
-import { executeCapability,toOpenAITools } from "./capabilities.js";
-import { parseRobotDesignTransport } from "./robot-design.js";
-const SYSTEM=`You are AI Factory, a disciplined autonomous engineering agent. Treat the model as designer/planner and the deterministic factory as verifier/executor. Use the smallest number of calls necessary. Never claim success without verified tool evidence. Never dispatch physical machinery or irreversible manufacturing jobs without explicit approval.
+import { providerInfo, getClient } from "./providers.js";
+import { ExecutionController, withAbortTimeout, withTimeout } from "./execution.js";
+import { executeCapability, toOpenAITools } from "./capabilities.js";
+import { runRobotAgent } from "./robot-agent.js";
 
-ROBOT CAD BUILD PROTOCOL: When the request is a robot/mechanical/CAD build, design the object yourself and submit ONE complete ai-factory.robot-design/v1 object through ai_factory_submit_robot_design. Do not inspect/search Fusion before submitting the design. Do not use legacy primitives. The design MUST have {schema,name,mission,requirements,parts,joints,designRationale,unresolvedQuestions}. Every part MUST have {id,name,material,manufacturingProcess,geometry}; geometry MUST have {schema:'ai-factory.robot-geometry/v1',units:'mm',operations,outputOperationId}. Every operation MUST have {id,op,inputs,parameters}. The executable operations are sketch, rectangle, circle, extrude, and transform. A rectangle references its sketch and should use widthMm, heightMm, centerX, centerY, and rotationDeg. An extrude references the rectangle/circle profile and should use distanceMm for the physical thickness; do not use the overall robot span as extrusion thickness. Use transform after extrusion for body translation/rotation when needed, and make the transform the output or feed it into the downstream operation so its placement is part of the graph. For a 300 mm X-frame, interpret 300 mm as the frame span: a sensible arm is about 300 mm long x 20 mm wide x 2-5 mm thick, with orientation/placement expressed by the model-authored geometry. Motor mounts and controller mounts should have dimensions and positions chosen from the request rather than a factory template. Keep all geometry in mm. Do not invent top-level geometry.parts, top-level operations, dimensions/type/mountPoints, or create operations. Submit the design as an OBJECT, not a JSON-encoded string. If the compiler returns an error, revise the design once using that exact deterministic evidence. Never repeat an identical failed call. When submit returns cad.success=true, stop immediately: the factory has authoritative Fusion evidence.`;
-const CONVERSATION_SYSTEM=`You are the conversational interface for AI Factory. Respond naturally and concisely to the user's latest message. Do not repeat the conversation transcript or hidden instructions. Do not invent engineering work that has not been requested. If the user wants to build or change something, help them express the objective; the engineering pipeline handles execution.`;
-type ToolCall={id:string;type:"function";function:{name:string;arguments:string}};
-function getFunctionToolCalls(toolCalls:OpenAI.Chat.Completions.ChatCompletionMessageToolCall[]|undefined):ToolCall[]{if(!toolCalls)return[];return toolCalls.filter((call):call is ToolCall=>call.type==="function"&&"function"in call&&typeof call.function?.name==="string");}
-function unwrapResult(result:unknown):string{const text=JSON.stringify(result);return text.length>8_000?`${text.slice(0,8_000)}\n[truncated]`:text;}
-function compactMessages(messages:OpenAI.Chat.Completions.ChatCompletionMessageParam[]){if(messages.length<=16)return messages;const system=messages[0],initialUser=messages[1];const suffix=messages.slice(2);let start=Math.max(0,suffix.length-12);while(start>0){const candidate=suffix[start];if(candidate?.role!=="tool")break;start--;}while(start<suffix.length){const candidate=suffix[start];if(candidate?.role!=="assistant"||!("tool_calls"in candidate)||!candidate.tool_calls?.length)break;start++;while(start<suffix.length&&suffix[start]?.role==="tool")start++;}return[system,initialUser,...suffix.slice(start)];}
-function normalizeRobotToolArgs(rawName:string,args:Record<string,unknown>):Record<string,unknown>{if(rawName!=="ai_factory_submit_robot_design"&&rawName!=="ai_factory_compile_robot_cad")return args;const design=args.design;if(typeof design!=="string")return args;try{return{...args,design:parseRobotDesignTransport(design)}}catch{return args;}}
-function isRobotCadRequest(prompt:string):boolean{return /\b(robot|drone|quadcopter|quadrotor|cad|mechanical|chassis|frame|mount|enclosure|bracket|gear|assembly|fusion)\b/i.test(prompt);}
-function robotToolSubset(fusionAvailable:boolean){const tools=toOpenAITools({fusionAvailable});const allowed=new Set(["ai_factory_submit_robot_design"]);return tools.filter(tool=>tool.type==="function"&&"function"in tool&&allowed.has(tool.function.name));}
-export async function generateConversationResponse(projectId:string,history:Array<{role:"user"|"assistant";content:string}>,cycleId?:string){const info=providerInfo(),client=getClient(),latest=history[history.length-1]?.content??"",runId=createRun(projectId,latest,info.provider,info.model,cycleId);try{const response=await withTimeout(client.chat.completions.create({model:info.model,temperature:config.TEMPERATURE,messages:[{role:"system",content:CONVERSATION_SYSTEM},...history.slice(-12)]}),config.MODEL_TIMEOUT_MS,"Conversation response");const output=response.choices[0]?.message?.content?.trim()??"";if(!output)throw new Error("Model returned no conversational response.");addEvent(runId,"model.message",{content:output,mode:"conversation"});finishRun(runId,"completed",output);return{runId,output,provider:info};}catch(error){const message=String(error);addEvent(runId,"model.error",{mode:"conversation",error:message});finishRun(runId,"failed","");return{runId,output:"",error:message,provider:info};}}
-export async function runAgent(projectId:string,prompt:string,cycleId?:string){const info=providerInfo(),client=getClient(),runId=createRun(projectId,prompt,info.provider,info.model,cycleId),robotMode=isRobotCadRequest(prompt),controller=new ExecutionController({maxModelCalls:robotMode?Math.min(config.MAX_MODEL_CALLS,2):config.MAX_MODEL_CALLS,maxToolCalls:robotMode?Math.min(config.MAX_TOOL_CALLS,2):config.MAX_TOOL_CALLS,maxWallMs:robotMode?Math.min(config.MAX_RUN_MS,180_000):config.MAX_RUN_MS});try{let fusionAvailable=false;try{await withTimeout(fusion.connect(),config.TOOL_TIMEOUT_MS,"Fusion connection");await withTimeout(fusion.refresh(),config.TOOL_TIMEOUT_MS,"Fusion tool discovery");fusionAvailable=fusion.isConnected();addEvent(runId,"fusion.connected",{tools:fusion.getTools().map(tool=>tool.name)});}catch(error){addEvent(runId,"fusion.unavailable",{error:String(error)});}let messages:OpenAI.Chat.Completions.ChatCompletionMessageParam[]=[{role:"system",content:SYSTEM},{role:"user",content:`Project ID: ${projectId}\n\nUser request:\n${prompt}`}],tools=robotMode?robotToolSubset(fusionAvailable):toOpenAITools({fusionAvailable});let robotSubmissionAttempts=0;for(let step=1;step<=config.MAX_AGENT_STEPS;step++){if(!controller.canModelCall())break;controller.recordModelCall();const modelStarted=Date.now();addEvent(runId,"model.start",{step,call:controller.modelCalls});let response:OpenAI.Chat.Completions.ChatCompletion;try{response=await withAbortTimeout(signal=>client.chat.completions.create({model:info.model,temperature:config.TEMPERATURE,messages,tools,tool_choice:robotMode&&robotSubmissionAttempts===0?{type:"function",function:{name:"ai_factory_submit_robot_design"}}:"auto"},{signal}),Math.min(config.MODEL_TIMEOUT_MS,robotMode?90_000:config.MODEL_TIMEOUT_MS),"Model request");}catch(error){const message=String(error);addEvent(runId,"model.error",{step,error:message,elapsedMs:Date.now()-modelStarted});throw error;}const message=response.choices[0]?.message;if(!message)throw new Error("Model returned no message.");messages.push(message);const functionToolCalls=getFunctionToolCalls(message.tool_calls);addEvent(runId,"model.message",{step,elapsedMs:Date.now()-modelStarted,content:message.content??null,toolCalls:functionToolCalls.map(call=>call.function.name),budget:controller.summary()});if(functionToolCalls.length===0){const output=message.content?.trim()??"";if(robotMode&&robotSubmissionAttempts<2){messages.push({role:"user",content:"A robot CAD submission is mandatory. The previous response did not contain the required tool call. Submit exactly one ai_factory_submit_robot_design call. The design argument must be a JSON object, not a string. Do not explain."});continue;}if(!output)throw new Error("Model returned an empty final response.");finishRun(runId,"completed",output);return{runId,output,provider:info};}for(const call of functionToolCalls){if(!controller.canToolCall())break;const rawName=call.function.name;let args:Record<string,unknown>;try{args=normalizeRobotToolArgs(rawName,JSON.parse(call.function.arguments||"{}")as Record<string,unknown>);}catch(error){const content=JSON.stringify({error:`Invalid JSON tool arguments: ${String(error)}`});addEvent(runId,"tool.invalid_arguments",{step,toolName:rawName,args:call.function.arguments,error:String(error)});messages.push({role:"tool",tool_call_id:call.id,content});continue;}const repeated=controller.isRepeated(rawName,args);if(repeated&&rawName!=="ai_factory_submit_robot_design"){const content=JSON.stringify({error:"Repeated tool call blocked. Use the previous result or change the request."});addEvent(runId,"tool.repeated",{step,toolName:rawName,args});messages.push({role:"tool",tool_call_id:call.id,content});continue;}if(controller.isRepeated(rawName,args)&&rawName==="ai_factory_submit_robot_design"){const content=JSON.stringify({error:"The exact same robot design already failed. Revise the design using the deterministic error evidence before resubmitting."});addEvent(runId,"tool.repeated",{step,toolName:rawName,args});messages.push({role:"tool",tool_call_id:call.id,content});robotSubmissionAttempts++;if(robotSubmissionAttempts>=2){const failure="Robot CAD submission failed twice; deterministic compiler evidence requires review.";finishRun(runId,"failed","");return{runId,output:"",error:failure,provider:info};}continue;}controller.recordToolCall();const toolStarted=Date.now();addEvent(runId,"tool.call",{step,toolName:rawName,args,call:controller.toolCalls});try{const result=await withTimeout(executeCapability(rawName,args),config.TOOL_TIMEOUT_MS,`Factory capability ${rawName}`);const content=unwrapResult(result);addEvent(runId,"tool.result",{step,toolName:rawName,elapsedMs:Date.now()-toolStarted,result});messages.push({role:"tool",tool_call_id:call.id,content});if(rawName==="ai_factory_submit_robot_design"){robotSubmissionAttempts++;const cad=typeof result==="object"&&result!==null&&"cad"in result?(result as{cad?:{success?:boolean}}).cad:null;if(cad?.success===true){const output="Robot design compiled and verified in Fusion.";addEvent(runId,"factory.robot_cad.verified",{designHash:(result as{designHash?:unknown}).designHash,cad});finishRun(runId,"completed",output);return{runId,output,provider:info};}if(robotSubmissionAttempts>=2){const failure="Robot CAD submission failed twice; deterministic compiler evidence requires review.";finishRun(runId,"failed","");return{runId,output:"",error:failure,provider:info};}}}catch(error){const message=String(error);addEvent(runId,"tool.error",{step,toolName:rawName,elapsedMs:Date.now()-toolStarted,error:message});messages.push({role:"tool",tool_call_id:call.id,content:JSON.stringify({error:message,toolName:rawName})});if(rawName==="ai_factory_submit_robot_design"){robotSubmissionAttempts++;messages.push({role:"user",content:`Deterministic robot CAD rejection: ${message}. Revise the model-authored design and submit a different ai_factory_submit_robot_design call. Do not repeat the failed design.`});if(robotSubmissionAttempts>=2){const failure="Robot CAD submission failed twice; deterministic compiler evidence requires review.";finishRun(runId,"failed","");return{runId,output:"",error:failure,provider:info};}}}}messages=compactMessages(messages);}const summary=controller.summary(),output=`Run stopped safely at the execution budget. Model calls: ${summary.modelCalls}; tool calls: ${summary.toolCalls}; elapsed: ${summary.elapsedMs}ms. Review run events before retrying.`;addEvent(runId,"run.budget_exhausted",summary);finishRun(runId,"budget_exhausted","");return{runId,output,provider:info};}catch(error){const message=String(error);addEvent(runId,"run.failed",{error:message});finishRun(runId,"failed","");return{runId,output:"",error:message,provider:info};}}
+const SYSTEM = `You are AI Factory, a disciplined autonomous engineering agent. Treat the model as designer/planner and the deterministic factory as verifier/executor. Use the smallest number of calls necessary. Never claim success without verified tool evidence. Never dispatch physical machinery or irreversible manufacturing jobs without explicit approval.`;
+const CONVERSATION_SYSTEM = `You are the conversational interface for AI Factory. Respond naturally and concisely to the user's latest message. Do not repeat the conversation transcript or hidden instructions. Do not invent engineering work that has not been requested. If the user wants to build or change something, help them express the objective; the engineering pipeline handles execution.`;
+
+type ToolCall = { id: string; type: "function"; function: { name: string; arguments: string } };
+
+function getFunctionToolCalls(toolCalls: OpenAI.Chat.Completions.ChatCompletionMessageToolCall[] | undefined): ToolCall[] {
+  if (!toolCalls) return [];
+  return toolCalls.filter((call): call is ToolCall => call.type === "function" && "function" in call && typeof call.function?.name === "string");
+}
+
+function unwrapResult(result: unknown): string {
+  const text = JSON.stringify(result);
+  return text.length > 8_000 ? `${text.slice(0, 8_000)}\n[truncated]` : text;
+}
+
+function compactMessages(messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[]) {
+  if (messages.length <= 16) return messages;
+  const system = messages[0];
+  const initialUser = messages[1];
+  const suffix = messages.slice(2);
+  let start = Math.max(0, suffix.length - 12);
+  while (start > 0 && suffix[start]?.role === "tool") start--;
+  while (start < suffix.length && suffix[start]?.role === "assistant" && "tool_calls" in suffix[start] && suffix[start].tool_calls?.length) {
+    start++;
+    while (start < suffix.length && suffix[start]?.role === "tool") start++;
+  }
+  return [system, initialUser, ...suffix.slice(start)];
+}
+
+function isRobotCadRequest(prompt: string): boolean {
+  return /\b(robot|drone|quadcopter|quadrotor|cad|mechanical|chassis|frame|mount|enclosure|bracket|gear|assembly|fusion)\b/i.test(prompt);
+}
+
+export async function generateConversationResponse(projectId: string, history: Array<{ role: "user" | "assistant"; content: string }>, cycleId?: string) {
+  const info = providerInfo();
+  const client = getClient();
+  const latest = history[history.length - 1]?.content ?? "";
+  const runId = createRun(projectId, latest, info.provider, info.model, cycleId);
+  try {
+    const response = await withTimeout(
+      client.chat.completions.create({ model: info.model, temperature: config.TEMPERATURE, messages: [{ role: "system", content: CONVERSATION_SYSTEM }, ...history.slice(-12)] }),
+      config.MODEL_TIMEOUT_MS,
+      "Conversation response",
+    );
+    const output = response.choices[0]?.message?.content?.trim() ?? "";
+    if (!output) throw new Error("Model returned no conversational response.");
+    addEvent(runId, "model.message", { content: output, mode: "conversation" });
+    finishRun(runId, "completed", output);
+    return { runId, output, provider: info };
+  } catch (error) {
+    const message = String(error);
+    addEvent(runId, "model.error", { mode: "conversation", error: message });
+    finishRun(runId, "failed", "");
+    return { runId, output: "", error: message, provider: info };
+  }
+}
+
+export async function runAgent(projectId: string, prompt: string, cycleId?: string) {
+  const info = providerInfo();
+  const client = getClient();
+  const runId = createRun(projectId, prompt, info.provider, info.model, cycleId);
+  const robotMode = isRobotCadRequest(prompt);
+
+  // Robot CAD gets a dedicated JSON-design path. This avoids forcing a local model to
+  // synthesize a large nested function-call payload and removes the generic agent loop
+  // as a source of transport/retry failures.
+  if (robotMode) {
+    return runRobotAgent({ projectId, prompt, cycleId, runId, client, info });
+  }
+
+  const controller = new ExecutionController({
+    maxModelCalls: config.MAX_MODEL_CALLS,
+    maxToolCalls: config.MAX_TOOL_CALLS,
+    maxWallMs: config.MAX_RUN_MS,
+  });
+
+  try {
+    let fusionAvailable = false;
+    try {
+      await withTimeout(fusion.connect(), config.TOOL_TIMEOUT_MS, "Fusion connection");
+      await withTimeout(fusion.refresh(), config.TOOL_TIMEOUT_MS, "Fusion tool discovery");
+      fusionAvailable = fusion.isConnected();
+      addEvent(runId, "fusion.connected", { tools: fusion.getTools().map(tool => tool.name) });
+    } catch (error) {
+      addEvent(runId, "fusion.unavailable", { error: String(error) });
+    }
+
+    let messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
+      { role: "system", content: SYSTEM },
+      { role: "user", content: `Project ID: ${projectId}\n\nUser request:\n${prompt}` },
+    ];
+    const tools = toOpenAITools({ fusionAvailable });
+
+    for (let step = 1; step <= config.MAX_AGENT_STEPS; step++) {
+      if (!controller.canModelCall()) break;
+      controller.recordModelCall();
+      const modelStarted = Date.now();
+      addEvent(runId, "model.start", { step, call: controller.modelCalls });
+
+      let response: OpenAI.Chat.Completions.ChatCompletion;
+      try {
+        response = await withAbortTimeout(
+          signal => client.chat.completions.create({ model: info.model, temperature: config.TEMPERATURE, messages, tools, tool_choice: "auto" }, { signal }),
+          config.MODEL_TIMEOUT_MS,
+          "Model request",
+        );
+      } catch (error) {
+        const message = String(error);
+        addEvent(runId, "model.error", { step, error: message, elapsedMs: Date.now() - modelStarted });
+        throw error;
+      }
+
+      const message = response.choices[0]?.message;
+      if (!message) throw new Error("Model returned no message.");
+      messages.push(message);
+      const functionToolCalls = getFunctionToolCalls(message.tool_calls);
+      addEvent(runId, "model.message", {
+        step,
+        elapsedMs: Date.now() - modelStarted,
+        content: message.content ?? null,
+        toolCalls: functionToolCalls.map(call => call.function.name),
+        budget: controller.summary(),
+      });
+
+      if (functionToolCalls.length === 0) {
+        const output = message.content?.trim() ?? "";
+        if (!output) throw new Error("Model returned an empty final response.");
+        finishRun(runId, "completed", output);
+        return { runId, output, provider: info };
+      }
+
+      for (const call of functionToolCalls) {
+        if (!controller.canToolCall()) break;
+        const rawName = call.function.name;
+        let args: Record<string, unknown>;
+        try {
+          args = JSON.parse(call.function.arguments || "{}") as Record<string, unknown>;
+        } catch (error) {
+          const content = JSON.stringify({ error: `Invalid JSON tool arguments: ${String(error)}` });
+          addEvent(runId, "tool.invalid_arguments", { step, toolName: rawName, args: call.function.arguments, error: String(error) });
+          messages.push({ role: "tool", tool_call_id: call.id, content });
+          continue;
+        }
+
+        if (controller.isRepeated(rawName, args)) {
+          const content = JSON.stringify({ error: "Repeated tool call blocked. Use the previous result or change the request." });
+          addEvent(runId, "tool.repeated", { step, toolName: rawName, args });
+          messages.push({ role: "tool", tool_call_id: call.id, content });
+          continue;
+        }
+
+        controller.recordToolCall();
+        const toolStarted = Date.now();
+        addEvent(runId, "tool.call", { step, toolName: rawName, args, call: controller.toolCalls });
+        try {
+          const result = await withTimeout(executeCapability(rawName, args), config.TOOL_TIMEOUT_MS, `Factory capability ${rawName}`);
+          const content = unwrapResult(result);
+          addEvent(runId, "tool.result", { step, toolName: rawName, elapsedMs: Date.now() - toolStarted, result });
+          messages.push({ role: "tool", tool_call_id: call.id, content });
+        } catch (error) {
+          const message = String(error);
+          addEvent(runId, "tool.error", { step, toolName: rawName, elapsedMs: Date.now() - toolStarted, error: message });
+          messages.push({ role: "tool", tool_call_id: call.id, content: JSON.stringify({ error: message, toolName: rawName }) });
+        }
+      }
+
+      messages = compactMessages(messages);
+    }
+
+    const summary = controller.summary();
+    const output = `Run stopped safely at the execution budget. Model calls: ${summary.modelCalls}; tool calls: ${summary.toolCalls}; elapsed: ${summary.elapsedMs}ms. Review run events before retrying.`;
+    addEvent(runId, "run.budget_exhausted", summary);
+    finishRun(runId, "budget_exhausted", "");
+    return { runId, output, provider: info };
+  } catch (error) {
+    const message = String(error);
+    addEvent(runId, "run.failed", { error: message });
+    finishRun(runId, "failed", "");
+    return { runId, output: "", error: message, provider: info };
+  }
+}
