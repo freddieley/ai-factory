@@ -11,7 +11,8 @@ describe("factory capability registry", () => {
     expect(tools.some(tool => tool.function.name === "ai_factory_create_mounting_plate")).toBe(false);
   });
   it("supports domain discovery while hiding legacy CAD primitives", () => {
-    const cad = listCapabilities("cad"); expect(cad).toHaveLength(1); expect(cad[0].name).toBe("ai_factory_inspect_fusion");
+    const cad = listCapabilities("cad"); expect(cad).toHaveLength(2);
+    expect(cad.map(capability => capability.name)).toEqual(["ai_factory_inspect_fusion", "ai_factory_compile_robot_cad"]);
     expect(listCapabilities("mechanics").some(capability => capability.name === "ai_factory_submit_robot_design")).toBe(true);
     expect(listCapabilities("software")).toHaveLength(1); expect(listCapabilities("testing")).toHaveLength(2);
     expect(getCapability("ai_factory_submit_robot_design")?.domain).toBe("mechanics");
