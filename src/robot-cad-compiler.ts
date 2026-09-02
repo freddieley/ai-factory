@@ -14,7 +14,6 @@ export type RobotCadCompileResult = {
 };
 
 function py(value: unknown): string { return JSON.stringify(value); }
-
 function point(x: number, y: number): string { return `adsk.core.Point3D.create(${x},${y},0)`; }
 
 function compilePart(part: RobotDesign["parts"][number]): { script: string; unsupported: string[] } {
@@ -87,7 +86,7 @@ function compilePart(part: RobotDesign["parts"][number]): { script: string; unsu
   return { script: lines.join("\n"), unsupported };
 }
 
-function fusionToolText(result: unknown): string {
+export function extractFusionToolText(result: unknown): string {
   if (typeof result === "string") return result;
   if (result && typeof result === "object" && !Array.isArray(result)) {
     const record = result as Record<string, unknown>;
@@ -144,7 +143,7 @@ export async function compileRobotDesignToFusion(input: unknown): Promise<RobotC
   if (!fusion.isConnected()) await fusion.connect();
   try {
     const result = await withTimeout(fusion.callTool("fusion_mcp_execute", { featureType: "script", object: { script: compiled.script } }), config.TOOL_TIMEOUT_MS, "Fusion robot CAD compilation");
-    const text = fusionToolText(result);
+    const text = extractFusionToolText(result);
     const actualHash = text.match(/design_hash=([^\r\n]+)/)?.[1]?.trim();
     const document = text.match(/document=([^\r\n]+)/)?.[1]?.trim();
     const parts = Number(text.match(/parts=(\d+)/)?.[1] ?? 0);
