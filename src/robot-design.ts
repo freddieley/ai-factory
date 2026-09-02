@@ -57,9 +57,31 @@ function normalizeScalarParameters(parameters: Record<string, unknown>): Record<
   return normalized;
 }
 
+export function parseRobotDesignTransport(value: unknown): unknown {
+  if (typeof value !== "string") return value;
+  let text = value.trim();
+  if (text.startsWith("```")) text = text.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim();
+  const attempts = [text];
+  if (/^\s*\{\\"/.test(text)) attempts.push(text.replace(/\\"/g, '"').replace(/\\\\/g, "\\"));
+  if (/^\s*"/.test(text)) {
+    try { const decoded = JSON.parse(text); if (typeof decoded === "string") attempts.unshift(decoded.trim()); } catch { /* try the remaining representations */ }
+  }
+  for (const candidate of attempts) {
+    try {
+      const parsed = JSON.parse(candidate);
+      if (typeof parsed === "string") {
+        try { return JSON.parse(parsed); } catch { return parsed; }
+      }
+      return parsed;
+    } catch { /* continue */ }
+  }
+  throw new Error("Robot design must be a JSON object (or a valid JSON-encoded object). The supplied string was not valid JSON.");
+}
+
 function normalizeRobotDesignInput(input: unknown): unknown {
-  if (!input || typeof input !== "object" || Array.isArray(input)) return input;
-  const source = input as Record<string, unknown>;
+  const transported = parseRobotDesignTransport(input);
+  if (!transported || typeof transported !== "object" || Array.isArray(transported)) return transported;
+  const source = transported as Record<string, unknown>;
   const parts = Array.isArray(source.parts) ? source.parts.map(rawPart => {
     if (!rawPart || typeof rawPart !== "object" || Array.isArray(rawPart)) return rawPart;
     const part = rawPart as Record<string, unknown>;
@@ -73,22 +95,28 @@ function normalizeRobotDesignInput(input: unknown): unknown {
     }) : g.operations;
     return { ...part, geometry: { ...g, operations } };
   }) : source.parts;
-  const joints = Array.isArray(source.joints) ? source.joints.map((rawJoint, index) => {
-    if (!rawJoint || typeof rawJoint !== "object" || Array.isArray(rawJoint)) return rawJoint;
+  const normalizationNotes: string[] = [];
+  const joints = Array.isArray(source.joints) ? source.joints.flatMap((rawJoint, index) => {
+    if (!rawJoint || typeof rawJoint !== "object" || Array.isArray(rawJoint)) return [rawJoint];
     const joint = rawJoint as Record<string, unknown>;
     const partIds = Array.isArray(joint.partIds) ? joint.partIds.filter(value => typeof value === "string") : [];
     const parentPartId = joint.parentPartId ?? partIds[0];
     const childPartId = joint.childPartId ?? partIds[1];
     const id = typeof joint.id === "string" ? joint.id : `JOINT-${String(index + 1).padStart(3, "0")}`;
     const type = joint.type === "bolted" ? "fixed" : joint.type;
-    return { ...joint, id, parentPartId, childPartId, type };
+    if (typeof joint.partId === "string" && parentPartId === undefined && childPartId === undefined) {
+      normalizationNotes.push(`Joint ${id} was omitted because robot-design/v1 assembly joints require both parentPartId and childPartId; single-part mount annotations are not assembly joints.`);
+      return [];
+    }
+    return [{ ...joint, id, parentPartId, childPartId, type }];
   }) : source.joints;
   const designRationale = Array.isArray(source.designRationale) ? source.designRationale.map(item => {
     if (typeof item === "string") return item;
     if (item && typeof item === "object" && !Array.isArray(item) && typeof (item as Record<string, unknown>).description === "string") return String((item as Record<string, unknown>).description);
     return String(item);
   }) : source.designRationale;
-  return { ...source, parts, joints, designRationale };
+  const unresolvedQuestions = Array.isArray(source.unresolvedQuestions) ? source.unresolvedQuestions.map(String) : [];
+  return { ...source, parts, joints, designRationale, unresolvedQuestions: [...unresolvedQuestions, ...normalizationNotes] };
 }
 
 export function validateRobotDesign(input: unknown): RobotDesign {
