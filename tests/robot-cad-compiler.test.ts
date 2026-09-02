@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { compileRobotDesignToFusionScript } from "../src/robot-cad-compiler.js";
+import { compileRobotDesignToFusionScript, extractFusionToolText } from "../src/robot-cad-compiler.js";
 
 describe("robot CAD compiler", () => {
   const design = {
@@ -21,8 +21,20 @@ describe("robot CAD compiler", () => {
     expect(result.designHash).toMatch(/^[a-f0-9]{64}$/);
     expect(result.script).toContain("Custom chassis");
     expect(result.script).toContain("extrudeFeatures.createInput");
-    expect(result.script).toContain("addTwoPointRectangle");
+    expect(result.script).toContain("sketchLines.addByTwoPoints");
+    expect(result.script).toContain("Point3D.create(-6,-4,0)");
     expect(result.script).not.toContain("executeCreateBox");
+  });
+
+  it("honors model-authored rectangle center and rotation", () => {
+    const result = compileRobotDesignToFusionScript({ ...design, parts: [{ ...design.parts[0], geometry: { ...design.parts[0].geometry, operations: [
+      { id: "sk", op: "sketch", inputs: [], parameters: {} },
+      { id: "profile", op: "rectangle", inputs: ["sk"], parameters: { widthMm: 300, heightMm: 20, centerX: 150, centerY: -150, rotationDeg: 90 } },
+      { id: "solid", op: "extrude", inputs: ["profile"], parameters: { distanceMm: 3 } },
+    ], outputOperationId: "solid" } }] });
+    expect(result.unsupportedOperations).toEqual([]);
+    expect(result.script).toContain("Point3D.create(16,-16.5,0)");
+    expect(result.script).toContain("Point3D.create(14,-16.5,0)");
   });
 
   it("accepts common model-generated dimension aliases and scalar circle centers", () => {
@@ -45,6 +57,12 @@ describe("robot CAD compiler", () => {
     expect(result.unsupportedOperations).toEqual([]);
     expect(result.script).toContain("body.transformBy(matrix)");
     expect(result.script).toContain("setToRotation");
+  });
+
+  it("decodes MCP text content instead of regexing JSON-escaped newlines", () => {
+    const result = extractFusionToolText({ content: [{ type: "text", text: "AI_FACTORY_ROBOT_CAD_RESULT\ndesign_hash=abc123\ndocument=Drone\nparts=7\nbodies=7" }] });
+    expect(result).toContain("design_hash=abc123\ndocument=Drone");
+    expect(result).toContain("parts=7\nbodies=7");
   });
 
   it("refuses unsupported operations instead of silently substituting geometry", () => {
