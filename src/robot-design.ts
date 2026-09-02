@@ -42,6 +42,19 @@ function assertAcyclic(operations: RobotGeometryOperation[], partId: string): vo
   for (const operation of operations) visit(operation.id);
 }
 
+function assertOutputReachability(operations: RobotGeometryOperation[], outputOperationId: string, partId: string): void {
+  const byId = new Map(operations.map(operation => [operation.id, operation]));
+  const reachable = new Set<string>();
+  const visit = (id: string): void => {
+    if (reachable.has(id)) return;
+    const operation = byId.get(id); if (!operation) return;
+    reachable.add(id); for (const input of operation.inputs) visit(input);
+  };
+  visit(outputOperationId);
+  const disconnected = operations.filter(operation => !reachable.has(operation.id)).map(operation => operation.id);
+  if (disconnected.length) throw new Error(`Geometry operation graph for ${partId} contains disconnected operations not contributing to outputOperationId ${outputOperationId}: ${disconnected.join(", ")}.`);
+}
+
 function normalizeScalarParameters(parameters: Record<string, unknown>): Record<string, unknown> {
   const normalized = { ...parameters };
   if (normalized.widthMm === undefined && typeof normalized.width === "number") normalized.widthMm = normalized.width;
@@ -144,6 +157,7 @@ export function validateRobotDesign(input: unknown): RobotDesign {
     for (const operation of part.geometry.operations) for (const input of operation.inputs) if (!operationSet.has(input)) throw new Error(`Geometry operation ${operation.id} references unknown input ${input}.`);
     if (!operationSet.has(part.geometry.outputOperationId)) throw new Error(`Part ${part.id} outputOperationId references an unknown geometry operation.`);
     assertAcyclic(part.geometry.operations, part.id);
+    assertOutputReachability(part.geometry.operations, part.geometry.outputOperationId, part.id);
   }
   return design;
 }
