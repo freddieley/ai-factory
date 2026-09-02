@@ -8,9 +8,10 @@ describe("factory capability registry", () => {
   });
   it("supports domain discovery without exposing non-CAD capabilities prematurely", () => {
     const cad = listCapabilities("cad"); expect(cad).toHaveLength(6); expect(cad.every(capability => capability.name.startsWith("ai_factory_"))).toBe(true); expect(cad.length).toBeLessThan(capabilities.length);
-    expect(listCapabilities("software")).toHaveLength(1); expect(listCapabilities("testing")).toHaveLength(2); expect(getCapability("ai_factory_generate_firmware")?.domain).toBe("software"); expect(getCapability("ai_factory_run_firmware_hil")?.domain).toBe("testing"); expect(getCapability("ai_factory_plan_firmware_flash")?.domain).toBe("testing");
+    expect(listCapabilities("software")).toHaveLength(1); expect(listCapabilities("testing")).toHaveLength(2); expect(getCapability("ai_factory_generate_firmware")?.domain).toBe("software"); expect(getCapability("ai_factory_run_firmware_hil")?.domain).toBe("testing"); expect(getCapability("ai_factory_plan_firmware_flash")?.domain).toBe("testing"); expect(getCapability("ai_factory_create_drone_reference")?.domain).toBe("electronics");
     expect(getCapability("ai_factory_create_plate")?.domain).toBe("cad"); expect(getCapability("ai_factory_inspect_fusion")?.domain).toBe("cad"); expect(getCapability("ai_factory_plan_parametric_box")?.domain).toBe("mechanics");
   });
   it("exposes the Fusion document inspection operation instead of the obsolete queryType wrapper", () => { const tool=getCapability("ai_factory_inspect_fusion"); expect(tool?.parameters).toMatchObject({ type:"object", properties:{ operation:{type:"string",enum:["search","open","recent"]} }, required:["operation"] }); });
+  it("can generate the concrete drone reference without external systems", async () => { const result=await executeCapability("ai_factory_create_drone_reference",{}); expect(result).toMatchObject({ specification:{schema:"ai-factory.drone-reference/v1"}, architecture:{schema:"ai-factory.electronics-architecture/v1",systemMaxCurrentA:2} }); });
   it("rejects unknown capability execution before touching any external system", async () => { await expect(executeCapability("ai_factory_not_real", {})).rejects.toThrow("Unknown factory capability"); });
 });
