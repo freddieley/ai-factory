@@ -61,19 +61,38 @@ export function parseRobotDesignTransport(value: unknown): unknown {
   if (typeof value !== "string") return value;
   let text = value.trim();
   if (text.startsWith("```")) text = text.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim();
-  const attempts = [text];
-  if (/^\s*\{\\"/.test(text)) attempts.push(text.replace(/\\"/g, '"').replace(/\\\\/g, "\\"));
-  if (/^\s*"/.test(text)) {
-    try { const decoded = JSON.parse(text); if (typeof decoded === "string") attempts.unshift(decoded.trim()); } catch { /* try the remaining representations */ }
-  }
-  for (const candidate of attempts) {
+  const candidates: string[] = [];
+  const add = (candidate: string) => { if (candidate && !candidates.includes(candidate)) candidates.push(candidate); };
+  add(text);
+  let current = text;
+  for (let depth = 0; depth < 4; depth++) {
     try {
-      const parsed = JSON.parse(candidate);
-      if (typeof parsed === "string") {
-        try { return JSON.parse(parsed); } catch { return parsed; }
+      const parsed = JSON.parse(current);
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) return parsed;
+      if (typeof parsed === "string") { current = parsed.trim(); add(current); continue; }
+      break;
+    } catch { /* try transport repair variants below */ }
+    const repaired = current.replace(/\\\\/g, "\\").replace(/\\"/g, '"');
+    if (repaired === current) break;
+    current = repaired;
+    add(current);
+  }
+  const firstObject = text.indexOf("{");
+  const lastObject = text.lastIndexOf("}");
+  if (firstObject >= 0 && lastObject > firstObject) {
+    let fragment = text.slice(firstObject, lastObject + 1);
+    for (let depth = 0; depth < 4; depth++) {
+      try {
+        const parsed = JSON.parse(fragment);
+        if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) return parsed;
+        if (typeof parsed === "string") { fragment = parsed.trim(); continue; }
+        break;
+      } catch {
+        const repaired = fragment.replace(/\\\\/g, "\\").replace(/\\"/g, '"');
+        if (repaired === fragment) break;
+        fragment = repaired;
       }
-      return parsed;
-    } catch { /* continue */ }
+    }
   }
   throw new Error("Robot design must be a JSON object (or a valid JSON-encoded object). The supplied string was not valid JSON.");
 }
