@@ -29,4 +29,11 @@ describe("robot CAD compiler", () => {
     expect(result.unsupportedOperations).toContain("body:s:sweep");
     expect(result.script).not.toContain("createBox");
   });
+
+  it("rejects cyclic operation graphs before generating executable CAD", () => {
+    expect(() => compileRobotDesignToFusionScript({ ...design, parts: [{ ...design.parts[0], geometry: { ...design.parts[0].geometry, operations: [
+      { id: "a", op: "transform", inputs: ["b"], parameters: {} },
+      { id: "b", op: "transform", inputs: ["a"], parameters: {} },
+    ], outputOperationId: "a" } }] })).toThrow("contains a cycle");
+  });
 });
