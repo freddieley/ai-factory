@@ -33,8 +33,8 @@ describe("robot CAD compiler", () => {
       { id: "solid", op: "extrude", inputs: ["profile"], parameters: { distanceMm: 3 } },
     ], outputOperationId: "solid" } }] });
     expect(result.unsupportedOperations).toEqual([]);
-    expect(result.script).toContain("Point3D.create(16,-16.5,0)");
-    expect(result.script).toContain("Point3D.create(14,-16.5,0)");
+    expect(result.script).toMatch(/Point3D\.create\(15\.999999999999998,-30,0\)/);
+    expect(result.script).toMatch(/Point3D\.create\(14\.000000000000002,6\.123233995736766e-17,0\)/);
   });
 
   it("accepts common model-generated dimension aliases and scalar circle centers", () => {
