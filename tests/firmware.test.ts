@@ -40,3 +40,40 @@ describe("firmware generation", () => {
     expect(generateFirmwareProject(architecture, target)).toEqual(generateFirmwareProject(architecture, target));
   });
 });
+
+describe("board-specific AVR firmware target", () => {
+  it("generates a real cross-compilation project for a known AVR board", () => {
+    const project = generateFirmwareProject(architecture, { name: "avr-board", architecture: "avr-c", board: "atmega328p" });
+    expect(project.target.toolchain).toBe("avr-gcc");
+    expect(project.files.map(file => file.path)).toEqual(["src/main.c", "README.md"]);
+    expect(project.buildCommand).toEqual(["avr-gcc", "-mmcu=atmega328p", "-DF_CPU=16000000UL", "-Os", "-std=c11", "-Wall", "-Wextra", "-Werror", "src/main.c", "-o", "firmware.elf"]);
+    expect(project.postBuildSteps).toEqual([["avr-objcopy", "-O", "ihex", "-R", ".eeprom", "firmware.elf", "firmware.hex"], ["avr-size", "--format=avr", "--mcu=atmega328p", "firmware.elf"]]);
+    expect(project.image).toEqual({ path: "firmware.hex", format: "ihex" });
+  });
+
+  it("rejects an unknown AVR board", () => {
+    expect(() => generateFirmwareProject(architecture, { name: "avr-board", architecture: "avr-c", board: "not-a-real-board" })).toThrow(/Unknown AVR board/);
+  });
+
+  it("rejects a toolchain/architecture mismatch instead of silently ignoring it", () => {
+    expect(() => generateFirmwareProject(architecture, { name: "avr-board", architecture: "avr-c", toolchain: "host-g++", board: "atmega328p" })).toThrow(/avr-c firmware targets require the avr-gcc toolchain/);
+    expect(() => generateFirmwareProject(architecture, { name: "host-board", architecture: "portable-cpp", toolchain: "avr-gcc", board: "generic" })).toThrow(/portable-cpp firmware targets require the host-g\+\+ toolchain/);
+  });
+
+  it("refuses host HIL execution for a board-specific target, distinguishing simulation from physical execution", async () => {
+    const project = generateFirmwareProject(architecture, { name: "avr-board", architecture: "avr-c", board: "atmega328p" });
+    await expect(runFirmwareHil(project)).rejects.toThrow(/cannot be run here.*authorized hardware adapter/s);
+  });
+
+  it.skipIf(process.env.AVR_GCC_INTEGRATION !== "1")("cross-compiles a real Intel HEX image for the target MCU with avr-gcc", async () => {
+    const project = generateFirmwareProject(architecture, { name: "avr-board", architecture: "avr-c", board: "atmega328p" });
+    const result = await buildFirmwareProject(project);
+    expect(result.status).toBe("pass");
+    expect(result.exitCode).toBe(0);
+    expect(result.postBuildSteps).toHaveLength(2);
+    expect(result.postBuildSteps.every(step => step.exitCode === 0)).toBe(true);
+    expect(result.image?.format).toBe("ihex");
+    expect(result.image?.content.startsWith(":")).toBe(true);
+    expect(result.image?.sizeBytes).toBeGreaterThan(0);
+  });
+});

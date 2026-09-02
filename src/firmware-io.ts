@@ -25,7 +25,8 @@ export function planFirmwareFlash(input: unknown): FirmwareFlashPlan {
 }
 
 export async function runFirmwareHil(projectInput: unknown): Promise<FirmwareHilResult> {
-  const project = FirmwareProject.parse(projectInput); if (project.target.toolchain !== "host-g++") throw new Error(`Unsupported HIL toolchain: ${project.target.toolchain}`);
+  const project = FirmwareProject.parse(projectInput);
+  if (project.target.toolchain !== "host-g++") throw new Error(`Host-in-the-loop execution requires the host-g++ verification target; '${project.target.toolchain}' firmware is a board-specific cross-compiled build and is not host machine code, so it cannot be run here. Physical hardware-in-the-loop requires a dedicated authorized hardware adapter, which is not yet implemented.`);
   const root = await mkdtemp(join(tmpdir(), "ai-factory-firmware-hil-"));
   try {
     for (const file of project.files) { const destination = join(root, file.path); await mkdir(join(destination, ".."), { recursive: true }); await writeFile(destination, file.content, "utf8"); }

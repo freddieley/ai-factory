@@ -41,3 +41,22 @@ jobs:
         env:
           KICAD_CLI_INTEGRATION: "1"
           KICAD_INTEGRATION_WORKSPACE: ${{ github.workspace }}/data/kicad
+
+  avr-firmware-integration:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install AVR cross-compilation toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends gcc-avr binutils-avr avr-libc
+      - run: avr-gcc --version
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+        env:
+          AVR_GCC_INTEGRATION: "1"
