@@ -82,7 +82,7 @@ function compilePart(part: RobotDesign["parts"][number]): { script: string; unsu
         unsupported.push(`${part.id}:${op.id}:${op.op}`);
     }
   }
-  lines.push(`if component.bRepBodies.count - bodiesBefore < 1: raise RuntimeError(${py(`Part ${part.id} produced no solid body`)})`);
+  lines.push(`if component.bRepBodies.count - bodiesBefore < 1: raise RuntimeError(${py(`Part ${part.id} produced no solid body`)})`, `createdBodies += component.bRepBodies.count - bodiesBefore`);
   return { script: lines.join("\n"), unsupported };
 }
 
@@ -127,12 +127,13 @@ export function compileRobotDesignToFusionScript(input: unknown): { design: Robo
     `    design.attributes.add('AI_FACTORY', 'robot_design_hash', ${py(designHash)})`,
     `    doc.attributes.add('AI_FACTORY', 'robot_design_hash', ${py(designHash)})`,
     "    refs = {}",
+    "    createdBodies = 0",
     ...parts.flatMap(part => part.split("\n").map(line => `    ${line}`)),
     `    print('AI_FACTORY_ROBOT_CAD_RESULT')`,
     `    print('design_hash=' + ${py(designHash)})`,
     `    print('document=' + app.activeDocument.name)`,
     `    print('parts=${design.parts.length}')`,
-    `    print('bodies=' + str(root.bRepBodies.count))`,
+    `    print('bodies=' + str(createdBodies))`,
   ].join("\n");
   return { design, designHash, script, unsupportedOperations: unsupported };
 }
