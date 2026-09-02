@@ -214,9 +214,40 @@ function normalizeRobotDesignInput(input: unknown): unknown {
   return { ...source, parts, joints, designRationale, unresolvedQuestions: [...unresolvedQuestions, ...normalizationNotes] };
 }
 
+function partPlacementSignature(part: RobotPart): string {
+  const values: string[] = [];
+  for (const operation of part.geometry.operations) {
+    const p = operation.parameters;
+    if (operation.op === "rectangle" || operation.op === "circle") {
+      values.push(`${operation.op}:${String(p.centerX ?? 0)},${String(p.centerY ?? 0)},${String(p.rotationDeg ?? 0)}`);
+    } else if (operation.op === "transform") {
+      values.push(`transform:${String(p.translateXmm ?? p.translateX ?? 0)},${String(p.translateYmm ?? p.translateY ?? 0)},${String(p.rotationDeg ?? p.rotateDeg ?? 0)}`);
+    }
+  }
+  return values.join("|");
+}
+
+function assertRepeatedPartsArePlacedDistinctly(parts: RobotPart[]): void {
+  const groups = new Map<string, RobotPart[]>();
+  for (const part of parts) {
+    const key = `${part.name.toLowerCase().trim()}|${part.material.toLowerCase().trim()}|${part.manufacturingProcess.toLowerCase().trim()}`;
+    const group = groups.get(key) ?? [];
+    group.push(part);
+    groups.set(key, group);
+  }
+  for (const [key, group] of groups) {
+    if (group.length < 2) continue;
+    const signatures = group.map(partPlacementSignature);
+    if (signatures.every(signature => signature === signatures[0])) {
+      throw new Error(`Repeated parts are coincident: ${key}. Distinct repeated components must have distinct sketch centers or transform placements.`);
+    }
+  }
+}
+
 export function validateRobotDesign(input: unknown): RobotDesign {
   const design = RobotDesign.parse(normalizeRobotDesignInput(input));
   assertUnique(design.requirements.map(r => r.id), "Requirement"); assertUnique(design.parts.map(p => p.id), "Part"); assertUnique(design.joints.map(j => j.id), "Joint");
+  assertRepeatedPartsArePlacedDistinctly(design.parts);
   const partIds = new Set(design.parts.map(p => p.id));
   for (const joint of design.joints) { if (!partIds.has(joint.parentPartId) || !partIds.has(joint.childPartId)) throw new Error(`Joint ${joint.id} references an unknown part.`); if (joint.parentPartId === joint.childPartId) throw new Error(`Joint ${joint.id} cannot connect a part to itself.`); }
   for (const part of design.parts) {
