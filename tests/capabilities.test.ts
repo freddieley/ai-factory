@@ -37,5 +37,10 @@ describe("factory capability registry", () => {
     const result=await executeCapability("ai_factory_submit_robot_design",{design:{schema:"ai-factory.robot-design/v1",name:"Test robot",mission:"Inspect a test fixture",requirements:[{id:"R1",description:"Carry payload",category:"functional",priority:"must"}],parts:[{id:"body",name:"Body",material:"aluminium",manufacturingProcess:"CNC",geometry:{schema:"ai-factory.robot-geometry/v1",units:"mm",operations:[{id:"s",op:"sketch",inputs:[],parameters:{plane:"XY"}},{id:"e",op:"extrude",inputs:["s"],parameters:{distanceMm:5}}],outputOperationId:"e"}}],joints:[],designRationale:[],unresolvedQuestions:[]}});
     expect(result).toMatchObject({schema:"ai-factory.robot-design-result/v1",design:{schema:"ai-factory.robot-design/v1"},designHash:expect.any(String),cad:{schema:"ai-factory.robot-cad-compile/v1",success:true}});
   });
+  it("accepts a JSON-encoded robot design and still applies strict validation", async () => {
+    const design={schema:"ai-factory.robot-design/v1",name:"String design",mission:"Validate JSON transport",requirements:[{id:"R1",description:"Have one part",category:"functional",priority:"must"}],parts:[{id:"body",name:"Body",material:"aluminium",manufacturingProcess:"CNC",geometry:{schema:"ai-factory.robot-geometry/v1",units:"mm",operations:[{id:"s",op:"sketch",inputs:[],parameters:{plane:"XY"}},{id:"e",op:"extrude",inputs:["s"],parameters:{distanceMm:5}}],outputOperationId:"e"}}],joints:[],designRationale:[],unresolvedQuestions:[]};
+    const result=await executeCapability("ai_factory_submit_robot_design",{design:JSON.stringify(design)});
+    expect(result).toMatchObject({schema:"ai-factory.robot-design-result/v1",design:{name:"String design"},cad:{success:true}});
+  });
   it("rejects unknown capability execution before touching any external system", async () => { await expect(executeCapability("ai_factory_not_real", {})).rejects.toThrow("Unknown factory capability"); });
 });
