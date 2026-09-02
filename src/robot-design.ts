@@ -70,40 +70,54 @@ function normalizeScalarParameters(parameters: Record<string, unknown>): Record<
   return normalized;
 }
 
+function transportVariants(text: string): string[] {
+  const variants = new Set<string>([text]);
+  const add = (candidate: string) => { if (candidate && candidate !== text) variants.add(candidate); };
+  add(text.replace(/^\"([\\s\\S]*)\"$/u, "$1"));
+  add(text.replace(/\\\"/g, '"'));
+  add(text.replace(/\\\\/g, "\\"));
+  add(text.replace(/\\\\/g, "\\").replace(/\\\"/g, '"'));
+  add(text.replace(/\\n/g, "\n").replace(/\\r/g, "\r").replace(/\\t/g, "\t").replace(/\\\"/g, '"'));
+  return [...variants];
+}
+
 export function parseRobotDesignTransport(value: unknown): unknown {
   if (typeof value !== "string") return value;
   let text = value.trim();
   if (text.startsWith("```")) text = text.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim();
-  let current = text;
-  for (let depth = 0; depth < 4; depth++) {
-    try {
-      const parsed = JSON.parse(current);
-      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) return parsed;
-      if (typeof parsed === "string") { current = parsed.trim(); continue; }
-      break;
-    } catch { /* try transport repair variants below */ }
-    const repaired = current.replace(/\\\\/g, "\\").replace(/\\"/g, '"');
-    if (repaired === current) break;
-    current = repaired;
+
+  let candidates = [text];
+  let lastError = "unknown JSON transport error";
+  for (let depth = 0; depth < 8; depth++) {
+    const next: string[] = [];
+    for (const candidate of candidates) {
+      try {
+        const parsed = JSON.parse(candidate);
+        if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) return parsed;
+        if (typeof parsed === "string") next.push(parsed.trim());
+      } catch (error) {
+        lastError = error instanceof Error ? error.message : String(error);
+        for (const variant of transportVariants(candidate)) if (!next.includes(variant)) next.push(variant);
+      }
+    }
+    candidates = [...new Set(next.filter(Boolean))].slice(0, 32);
+    if (!candidates.length) break;
   }
+
   const firstObject = text.indexOf("{");
   const lastObject = text.lastIndexOf("}");
   if (firstObject >= 0 && lastObject > firstObject) {
-    let fragment = text.slice(firstObject, lastObject + 1);
-    for (let depth = 0; depth < 4; depth++) {
+    const fragment = text.slice(firstObject, lastObject + 1);
+    for (const candidate of transportVariants(fragment)) {
       try {
-        const parsed = JSON.parse(fragment);
+        const parsed = JSON.parse(candidate);
         if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) return parsed;
-        if (typeof parsed === "string") { fragment = parsed.trim(); continue; }
-        break;
-      } catch {
-        const repaired = fragment.replace(/\\\\/g, "\\").replace(/\\"/g, '"');
-        if (repaired === fragment) break;
-        fragment = repaired;
+      } catch (error) {
+        lastError = error instanceof Error ? error.message : String(error);
       }
     }
   }
-  throw new Error("Robot design must be a JSON object (or a valid JSON-encoded object). The supplied string was not valid JSON.");
+  throw new Error(`Robot design must be a JSON object (or a valid JSON-encoded object). The supplied string was not valid JSON. Parser detail: ${lastError}`);
 }
 
 function normalizeRobotDesignInput(input: unknown): unknown {
