@@ -53,18 +53,38 @@ describe("model-authored robot design IR", () => {
       ...design,
       parts: [{ ...design.parts[0], geometry: { ...design.parts[0].geometry, operations: [
         { id: "sk", op: "sketch", inputs: [], parameters: {} },
-        { id: "profile", op: "rectangle", inputs: ["sk"], parameters: { width: 300, height: 20 } },
-        { id: "solid", op: "extrude", inputs: ["profile"], parameters: { distanceMm: 2 } },
+        { id: "profile", op: "rectangle", inputs: [{ id: "sk" }], parameters: { width: 300, height: 20 } },
+        { id: "solid", op: "extrude", inputs: [{ id: "profile" }], parameters: { distanceMm: 2 } },
       ], outputOperationId: "solid" } }, secondPart],
       joints: [{ id: "j1", partIds: ["chassis", "chassis-2"], type: "bolted" }],
       designRationale: [{ description: "Generated from the requested mechanical objective." }],
     });
+    expect(result.parts[0].geometry.operations[1].inputs).toEqual(["sk"]);
+    expect(result.parts[0].geometry.operations[2].inputs).toEqual(["profile"]);
     expect(result.parts[0].geometry.operations[1].parameters.widthMm).toBe(300);
     expect(result.parts[0].geometry.operations[1].parameters.heightMm).toBe(20);
     expect(result.joints[0].parentPartId).toBe("chassis");
     expect(result.joints[0].childPartId).toBe("chassis-2");
     expect(result.joints[0].type).toBe("fixed");
     expect(result.designRationale[0]).toBe("Generated from the requested mechanical objective.");
+  });
+
+  it("normalizes the model's nested sketch geometry and narrative variants", () => {
+    const result = validateRobotDesign({
+      ...design,
+      parts: [{ ...design.parts[0], geometry: { ...design.parts[0].geometry, operations: [
+        { id: "sk", op: "sketch", inputs: [], parameters: {
+          operations: [{ id: "rect", op: "rectangle", inputs: [], parameters: { widthMm: 150, heightMm: 20, centerX: 0, centerY: 0, rotationDeg: 45 } }],
+        } },
+        { id: "solid", op: "extrude", inputs: ["sk"], parameters: { distanceMm: 2 } },
+      ], outputOperationId: "solid" } }],
+      designRationale: "Generated from a model-authored mechanical design.",
+      unresolvedQuestions: [{ question: "Motor pattern unspecified.", assumption: "Use a conservative standard pattern." }],
+    });
+    expect(Array.isArray(result.parts[0].geometry.operations[0].parameters.operations)).toBe(true);
+    expect(result.designRationale).toEqual(["Generated from a model-authored mechanical design."]);
+    expect(result.unresolvedQuestions[0]).toContain("Motor pattern unspecified.");
+    expect(result.unresolvedQuestions[0]).toContain("Assumption: Use a conservative standard pattern.");
   });
 
   it("drops legacy single-part mount annotations as explicit normalization notes", () => {
