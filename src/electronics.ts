@@ -58,7 +58,7 @@ function inferBlockType(requirement: ElectronicsRequirement): z.infer<typeof Fun
   const text = normalizedText(requirement);
   if (/(mcu|microcontroller|controller|processor|cpu|compute)/.test(text)) return "controller";
   if (/(motor|servo|esc|actuator|pump|valve|solenoid)/.test(text)) return "actuator";
-  if (/(sensor|imu|camera|lidar|encoder|gps|temperature|pressure|accelerometer|gyroscope)/.test(text)) return "sensor";
+  if (/(sensor|imu|camera|lidar|encoder|gps|accelerometer|gyroscope)/.test(text)) return "sensor";
   if (/(wifi|wi-fi|bluetooth|ble|can|ethernet|uart|i2c|spi|radio|wireless|usb)/.test(text)) return "communications";
   if (/(fuse|overcurrent|protection|emergency|safety|shutdown|interlock)/.test(text)) return "safety";
   if (/(voltage|current|power|battery|supply|rail|vbus|vin)/.test(text) || requirement.unit?.toUpperCase() === "V" || requirement.unit?.toUpperCase() === "A") return "power";
