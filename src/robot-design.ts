@@ -61,21 +61,17 @@ export function parseRobotDesignTransport(value: unknown): unknown {
   if (typeof value !== "string") return value;
   let text = value.trim();
   if (text.startsWith("```")) text = text.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim();
-  const candidates: string[] = [];
-  const add = (candidate: string) => { if (candidate && !candidates.includes(candidate)) candidates.push(candidate); };
-  add(text);
   let current = text;
   for (let depth = 0; depth < 4; depth++) {
     try {
       const parsed = JSON.parse(current);
       if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) return parsed;
-      if (typeof parsed === "string") { current = parsed.trim(); add(current); continue; }
+      if (typeof parsed === "string") { current = parsed.trim(); continue; }
       break;
     } catch { /* try transport repair variants below */ }
     const repaired = current.replace(/\\\\/g, "\\").replace(/\\"/g, '"');
     if (repaired === current) break;
     current = repaired;
-    add(current);
   }
   const firstObject = text.indexOf("{");
   const lastObject = text.lastIndexOf("}");
