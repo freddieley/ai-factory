@@ -25,10 +25,18 @@ describe("electronics component selection API", () => {
     await app.close();
   });
 
-  it("selects and persists compatible components", async () => {
+  it("selects, ERC-checks, and persists compatible components", async () => {
     const response = await app.inject({ method: "POST", url: `/api/projects/${projectId}/electronics/components/select`, payload: { architecture } });
     expect(response.statusCode).toBe(200);
-    expect(response.json()).toMatchObject({ artifactId: expect.any(String), contentHash: expect.stringMatching(/^[a-f0-9]{64}$/), selection: { schema: "ai-factory.electronics-component-selection/v1", selected: [{ partNumber: "MCU-API" }] } });
+    expect(response.json()).toMatchObject({
+      artifactId: expect.any(String),
+      contentHash: expect.stringMatching(/^[a-f0-9]{64}$/),
+      selection: {
+        schema: "ai-factory.electronics-component-selection/v1",
+        selected: [{ partNumber: "MCU-API" }],
+        ruleCheck: { schema: "ai-factory.electronics-erc/v1", status: "pass", findings: [] },
+      },
+    });
     const list = await app.inject({ method: "GET", url: `/api/projects/${projectId}/electronics/component-selections` });
     expect(list.statusCode).toBe(200);
     expect(list.json()).toHaveLength(1);
