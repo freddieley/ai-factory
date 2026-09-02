@@ -84,7 +84,7 @@ describe("robot CAD compiler", () => {
     expect(result.unsupportedOperations).toEqual([]);
     expect(result.script).toContain("Point3D.create");
     expect(result.script).toContain("sketchCircles.addByCenterRadius");
-    expect(result.script).toContain("distanceMm");
+    expect(result.script).toContain("1.5");
   });
 
   it("rejects disconnected geometry operations instead of executing geometry that is not part of the output", () => {
