@@ -1,19 +1,206 @@
 import { z } from "zod";
-import { createFactoryCycle,finishFactoryCycle,addCycleEvent,getFactoryCycle,listCycleEvents,updateFactoryCycleObjective } from "./db.js";
-import { runAgent,generateConversationResponse } from "./agent.js";
-import { generateEngineeringPlan } from "./planning.js";
-import { initializeProjectStages,transitionProjectStage } from "./lifecycle-db.js";
+import { createFactoryCycle, finishFactoryCycle, addCycleEvent, getFactoryCycle, listCycleEvents, updateFactoryCycleObjective } from "./db.js";
+import { runAgent, generateConversationResponse } from "./agent.js";
+import { generateEngineeringPlan, saveExecutionFallbackPlan } from "./planning.js";
+import { initializeProjectStages, transitionProjectStage } from "./lifecycle-db.js";
 import { getPlan } from "./engineering-db.js";
 import { isEngineeringRequest } from "./intent.js";
-export const FactoryRequest=z.object({projectId:z.string().min(1),objective:z.string().min(1),constraints:z.array(z.string()).default([]),maxIterations:z.number().int().min(1).max(5).default(2)});export type FactoryRequest=z.infer<typeof FactoryRequest>;export const FactoryFollowUpRequest=z.object({cycleId:z.string().min(1),message:z.string().min(1)});export type FactoryFollowUpRequest=z.infer<typeof FactoryFollowUpRequest>;export type FactoryCycleHooks={onCycleCreated?:(cycleId:string)=>void};type EventRow={run_id?:string;type:string;payload:string};
-function hasVerifiedToolResult(events:EventRow[],runId:string){return events.some(event=>{if(event.type!=="tool.result"||event.run_id!==runId)return false;try{const payload=JSON.parse(event.payload)as{result?:{success?:boolean;cad?:{success?:boolean}}};return payload.result?.success===true||payload.result?.cad?.success===true;}catch{return false;}});}
-function hasUnresolvedCondition(output:string){return /not verified|unable to|failed|error|unmet|cannot|blocked|needs review/i.test(output);}
-function planRequiresApproval(plan:ReturnType<typeof getPlan>){return Boolean(plan?.steps.some(step=>step.requiresApproval||step.operationClass==="manufacture"));}
-function agentStatus(output:string):"completed"|"budget_exhausted"|"failed"{if(output.startsWith("Run stopped safely at the execution budget."))return "budget_exhausted";if(output.startsWith("Agent failed:"))return "failed";return "completed";}
-function isExecutionControl(message:string){return /^(try again|retry|retry the plan|continue|continue with execution|proceed|proceed with execution|execute|execute the plan|run it|go ahead|approved|approve|yes|do it)\s*[.!]?$/i.test(message.trim());}
-function conversationHistory(cycleId:string):Array<{role:"user"|"assistant";content:string}>{return(listCycleEvents(cycleId)as unknown as Array<{type:string;payload:string}>).filter(event=>event.type==="factory.conversation.user"||event.type==="factory.conversation.assistant").map(event=>{try{const payload=JSON.parse(event.payload)as{message?:string};return payload.message?{role:event.type.endsWith("user")?"user":"assistant",content:payload.message}:null;}catch{return null;}}).filter((item):item is{role:"user"|"assistant";content:string}=>Boolean(item));}
-async function requestPlan(cycleId:string,projectId:string,objective:string,constraints:string[],currentPlan:ReturnType<typeof getPlan>){initializeProjectStages(projectId);transitionProjectStage(projectId,"planning","running");addCycleEvent(cycleId,"factory.planning.started",{projectId,objective,previousPlanId:currentPlan?.id??null});try{const planning=await generateEngineeringPlan(projectId,objective,constraints,{conversation:conversationHistory(cycleId),currentPlan});const generatedPlan="plan" in planning?planning.plan:undefined;const decision=planning.decision;addCycleEvent(cycleId,"factory.planning.completed",{action:decision.action,planId:generatedPlan?.id??null,requirements:generatedPlan?.requirements.length??0,steps:generatedPlan?.steps.length??0,requiresApproval:planRequiresApproval(generatedPlan??null),fallback:planning.fallback,warning:planning.warning,message:decision.message??null,revised:Boolean(currentPlan&&generatedPlan)});if(decision.action==="plan"&&generatedPlan){transitionProjectStage(projectId,"planning","passed");transitionProjectStage(projectId,"design","ready");return generatedPlan;}return null;}catch(error){addCycleEvent(cycleId,"factory.planning.failed",{error:String(error)});transitionProjectStage(projectId,"planning","failed",{error:String(error)});return null;}}
-async function executePlan(cycleId:string,projectId:string,plan:NonNullable<ReturnType<typeof getPlan>>,latestRequest:string,maxIterations:number){const results:unknown[]=[];for(let iteration=1;iteration<=maxIterations;iteration++){addCycleEvent(cycleId,"factory.iteration.started",{iteration,planId:plan.id});transitionProjectStage(projectId,"design","running");const prompt=iteration===1?`Execute the current validated engineering plan.\n\nCURRENT ENGINEERING PLAN:\n${JSON.stringify(plan)}\n\nLATEST USER REQUEST:\n${latestRequest}\n\nUse the saved engineering plan as the source of truth. The latest request has already been incorporated into this plan. Make only the CAD changes required by the plan. Use deterministic factory capabilities and verify the resulting state with their evidence. Do not manufacture, dispatch, or perform irreversible physical operations.`:`Re-evaluate the current engineering plan against the current Fusion state after the previous attempt.\n\nCURRENT ENGINEERING PLAN:\n${JSON.stringify(plan)}\n\nLATEST USER REQUEST:\n${latestRequest}\n\nUse prior tool evidence. For a robot/CAD build, do not search Fusion before submitting a corrected model-authored robot design. Make only necessary CAD corrections and verify them deterministically. Do not create duplicate geometry merely to satisfy an iteration. Do not manufacture or dispatch anything.`;const run=await runAgent(projectId,prompt,cycleId);results.push(run);const events=listCycleEvents(cycleId)as unknown as EventRow[];const output=typeof run.output==="string"?run.output:"",status=run.error?"failed":agentStatus(output),verified=hasVerifiedToolResult(events,run.runId),unresolved=hasUnresolvedCondition(output);addCycleEvent(cycleId,"factory.iteration.completed",{iteration,runId:run.runId,status,verified,unresolved,robotCadCompiled:verified});if(status!=="completed"||!verified||unresolved){if(iteration===maxIterations){transitionProjectStage(projectId,"design","blocked",{error:run.error??"Bounded cycle ended without a verified resolved result."});finishFactoryCycle(cycleId,"needs_review");if(output)addCycleEvent(cycleId,"factory.conversation.assistant",{message:output,runId:run.runId});return{cycleId,status:"needs_review" as const,iterations:results};}continue;}transitionProjectStage(projectId,"design","passed");transitionProjectStage(projectId,"verification","passed");finishFactoryCycle(cycleId,"completed");addCycleEvent(cycleId,"factory.verification.completed",{iteration,verified:true,planId:plan.id,robotCadCompiled:verified});addCycleEvent(cycleId,"factory.cycle.completed",{status:"completed",iterations:iteration,planId:plan.id});if(output)addCycleEvent(cycleId,"factory.conversation.assistant",{message:output,runId:run.runId});return{cycleId,status:"completed" as const,iterations:results};}finishFactoryCycle(cycleId,"needs_review");return{cycleId,status:"needs_review" as const,iterations:results};}
-async function respondWithPlanningDecision(cycleId:string,decision:{action:"clarify"|"none";message?:string},planningError?:string){const message=decision.message?.trim()||(decision.action==="clarify"?"I need a little more information before I can make a safe engineering plan.":"I’m ready when you have an engineering request.");if(planningError)addCycleEvent(cycleId,"factory.planning.failed",{error:planningError});addCycleEvent(cycleId,"factory.conversation.assistant",{message,mode:"planning"});finishFactoryCycle(cycleId,"completed");return{cycleId,status:"completed" as const,mode:"planning" as const,output:message};}
-export async function runFactory(request:FactoryRequest,hooks:FactoryCycleHooks={}){const normalized=FactoryRequest.parse(request),cycleId=createFactoryCycle(normalized.projectId,normalized.objective,normalized.constraints);hooks.onCycleCreated?.(cycleId);addCycleEvent(cycleId,"factory.conversation.user",{message:normalized.objective});try{if(!isEngineeringRequest(normalized.objective)){const conversation=await generateConversationResponse(normalized.projectId,conversationHistory(cycleId),cycleId);finishFactoryCycle(cycleId,"completed");if(conversation.output)addCycleEvent(cycleId,"factory.conversation.assistant",{message:conversation.output,mode:"conversation",runId:conversation.runId});return{cycleId,status:conversation.error?"failed":"completed",iterations:[],mode:"conversation",output:conversation.output,error:conversation.error};}const plan=await requestPlan(cycleId,normalized.projectId,normalized.objective,normalized.constraints,null);if(!plan){const events=listCycleEvents(cycleId)as unknown as Array<{type:string;payload:string}>;const latest=events.filter(event=>event.type==="factory.planning.completed").at(-1);const decision=latest?JSON.parse(latest.payload)as{action:"clarify"|"none";message?:string}:{action:"clarify" as const,message:"I could not create an engineering plan yet. Please clarify what you want built or changed."};return respondWithPlanningDecision(cycleId,decision);}updateFactoryCycleObjective(cycleId,plan.objective);return executePlan(cycleId,normalized.projectId,plan,normalized.objective,normalized.maxIterations);}catch(error){finishFactoryCycle(cycleId,"failed");addCycleEvent(cycleId,"factory.cycle.failed",{error:String(error)});throw error;}}
-export async function continueFactoryCycle(request:FactoryFollowUpRequest){const normalized=FactoryFollowUpRequest.parse(request),cycle=getFactoryCycle(normalized.cycleId)as{project_id:string;status:string;objective:string}|undefined;if(!cycle)throw new Error("cycle not found");if(cycle.status==="running")throw new Error("cycle is already running");addCycleEvent(normalized.cycleId,"factory.conversation.user",{message:normalized.message});try{const currentPlan=getPlan(cycle.project_id);if(isExecutionControl(normalized.message)){if(!currentPlan){const message="There is no active engineering plan to retry yet. Tell me what you want to build or change first.";addCycleEvent(normalized.cycleId,"factory.conversation.assistant",{message,mode:"conversation"});finishFactoryCycle(normalized.cycleId,"completed");return{cycleId:normalized.cycleId,status:"completed" as const,mode:"conversation" as const,output:message};}return executePlan(normalized.cycleId,cycle.project_id,currentPlan,normalized.message,2);}if(!isEngineeringRequest(normalized.message)){const conversation=await generateConversationResponse(cycle.project_id,conversationHistory(normalized.cycleId),normalized.cycleId);if(conversation.output)addCycleEvent(normalized.cycleId,"factory.conversation.assistant",{message:conversation.output,mode:"conversation",runId:conversation.runId});finishFactoryCycle(normalized.cycleId,conversation.error?"failed":"completed");return{cycleId:normalized.cycleId,status:conversation.error?"failed":"completed",mode:"conversation" as const,run:conversation,output:conversation.output,error:conversation.error};}const plan=await requestPlan(normalized.cycleId,cycle.project_id,normalized.message,[],currentPlan);if(!plan){const events=listCycleEvents(normalized.cycleId)as unknown as Array<{type:string;payload:string}>;const latest=events.filter(event=>event.type==="factory.planning.completed").at(-1);const decision=latest?JSON.parse(latest.payload)as{action:"clarify"|"none";message?:string}:{action:"clarify" as const,message:"I need a little more information before I can revise the engineering plan."};return respondWithPlanningDecision(normalized.cycleId,decision);}updateFactoryCycleObjective(normalized.cycleId,plan.objective);return executePlan(normalized.cycleId,cycle.project_id,plan,normalized.message,2);}catch(error){finishFactoryCycle(normalized.cycleId,"failed");addCycleEvent(normalized.cycleId,"factory.cycle.failed",{error:String(error)});throw error;}}
+
+export const FactoryRequest = z.object({ projectId: z.string().min(1), objective: z.string().min(1), constraints: z.array(z.string()).default([]), maxIterations: z.number().int().min(1).max(5).default(2) });
+export type FactoryRequest = z.infer<typeof FactoryRequest>;
+export const FactoryFollowUpRequest = z.object({ cycleId: z.string().min(1), message: z.string().min(1) });
+export type FactoryFollowUpRequest = z.infer<typeof FactoryFollowUpRequest>;
+export type FactoryCycleHooks = { onCycleCreated?: (cycleId: string) => void };
+type EventRow = { run_id?: string; type: string; payload: string };
+
+function hasVerifiedToolResult(events: EventRow[], runId: string) {
+  return events.some(event => {
+    if (event.type !== "tool.result" || event.run_id !== runId) return false;
+    try {
+      const payload = JSON.parse(event.payload) as { result?: { success?: boolean; cad?: { success?: boolean } } };
+      return payload.result?.success === true || payload.result?.cad?.success === true;
+    } catch {
+      return false;
+    }
+  });
+}
+
+function hasUnresolvedCondition(output: string) { return /not verified|unable to|failed|error|unmet|cannot|blocked|needs review/i.test(output); }
+function planRequiresApproval(plan: ReturnType<typeof getPlan>) { return Boolean(plan?.steps.some(step => step.requiresApproval || step.operationClass === "manufacture")); }
+function agentStatus(output: string): "completed" | "budget_exhausted" | "failed" { if (output.startsWith("Run stopped safely at the execution budget.")) return "budget_exhausted"; if (output.startsWith("Agent failed:")) return "failed"; return "completed"; }
+function isExecutionControl(message: string) { return /^(try again|retry|retry the plan|continue|continue with execution|proceed|proceed with execution|execute|execute the plan|run it|go ahead|approved|approve|yes|do it)\s*[.!]?$/i.test(message.trim()); }
+function isRobotCadObjective(objective: string) { return /\b(robot|drone|quadcopter|quadrotor|cad|mechanical|chassis|frame|mount|enclosure|bracket|gear|assembly|fusion)\b/i.test(objective); }
+
+function conversationHistory(cycleId: string): Array<{ role: "user" | "assistant"; content: string }> {
+  return (listCycleEvents(cycleId) as unknown as Array<{ type: string; payload: string }>)
+    .filter(event => event.type === "factory.conversation.user" || event.type === "factory.conversation.assistant")
+    .map(event => {
+      try {
+        const payload = JSON.parse(event.payload) as { message?: string };
+        return payload.message ? { role: event.type.endsWith("user") ? "user" : "assistant", content: payload.message } : null;
+      } catch {
+        return null;
+      }
+    })
+    .filter((item): item is { role: "user" | "assistant"; content: string } => Boolean(item));
+}
+
+async function requestPlan(cycleId: string, projectId: string, objective: string, constraints: string[], currentPlan: ReturnType<typeof getPlan>) {
+  initializeProjectStages(projectId);
+  transitionProjectStage(projectId, "planning", "running");
+  addCycleEvent(cycleId, "factory.planning.started", { projectId, objective, previousPlanId: currentPlan?.id ?? null });
+  try {
+    const planning = await generateEngineeringPlan(projectId, objective, constraints, { conversation: conversationHistory(cycleId), currentPlan });
+    const generatedPlan = "plan" in planning ? planning.plan : undefined;
+    const decision = planning.decision;
+    addCycleEvent(cycleId, "factory.planning.completed", { action: decision.action, planId: generatedPlan?.id ?? null, requirements: generatedPlan?.requirements.length ?? 0, steps: generatedPlan?.steps.length ?? 0, requiresApproval: planRequiresApproval(generatedPlan ?? null), fallback: planning.fallback, warning: planning.warning, message: decision.message ?? null, revised: Boolean(currentPlan && generatedPlan) });
+    if (decision.action === "plan" && generatedPlan) {
+      transitionProjectStage(projectId, "planning", "passed");
+      transitionProjectStage(projectId, "design", "ready");
+      return generatedPlan;
+    }
+    return null;
+  } catch (error) {
+    addCycleEvent(cycleId, "factory.planning.failed", { error: String(error) });
+    transitionProjectStage(projectId, "planning", "failed", { error: String(error) });
+    return null;
+  }
+}
+
+async function requestRobotExecutionPlan(cycleId: string, projectId: string, objective: string, constraints: string[]) {
+  initializeProjectStages(projectId);
+  transitionProjectStage(projectId, "planning", "running");
+  addCycleEvent(cycleId, "factory.planning.started", { projectId, objective, previousPlanId: null, mode: "direct-robot-cad" });
+  const plan = saveExecutionFallbackPlan(projectId, objective, constraints);
+  addCycleEvent(cycleId, "factory.planning.completed", {
+    action: "plan",
+    planId: plan.id,
+    requirements: plan.requirements.length,
+    steps: plan.steps.length,
+    requiresApproval: planRequiresApproval(plan),
+    fallback: true,
+    mode: "direct-robot-cad",
+    warning: "Robot CAD requests bypass the general-purpose planning model; the mechanical design model remains responsible for authoring the robot geometry, while the factory validates and executes it.",
+    message: null,
+    revised: false,
+  });
+  transitionProjectStage(projectId, "planning", "passed");
+  transitionProjectStage(projectId, "design", "ready");
+  return plan;
+}
+
+async function executePlan(cycleId: string, projectId: string, plan: NonNullable<ReturnType<typeof getPlan>>, latestRequest: string, maxIterations: number) {
+  const results: unknown[] = [];
+  for (let iteration = 1; iteration <= maxIterations; iteration++) {
+    addCycleEvent(cycleId, "factory.iteration.started", { iteration, planId: plan.id });
+    transitionProjectStage(projectId, "design", "running");
+    const prompt = iteration === 1
+      ? `Execute the current validated engineering plan.\n\nCURRENT ENGINEERING PLAN:\n${JSON.stringify(plan)}\n\nLATEST USER REQUEST:\n${latestRequest}\n\nUse the saved engineering plan as the source of truth. The latest request has already been incorporated into this plan. Make only the CAD changes required by the plan. Use deterministic factory capabilities and verify the resulting state with their evidence. Do not manufacture, dispatch, or perform irreversible physical operations.`
+      : `Re-evaluate the current engineering plan against the current Fusion state after the previous attempt.\n\nCURRENT ENGINEERING PLAN:\n${JSON.stringify(plan)}\n\nLATEST USER REQUEST:\n${latestRequest}\n\nUse prior tool evidence. For a robot/CAD build, do not search Fusion before submitting a corrected model-authored robot design. Make only necessary CAD corrections and verify them deterministically. Do not create duplicate geometry merely to satisfy an iteration. Do not manufacture or dispatch anything.`;
+    const run = await runAgent(projectId, prompt, cycleId);
+    results.push(run);
+    const events = listCycleEvents(cycleId) as unknown as EventRow[];
+    const output = typeof run.output === "string" ? run.output : "";
+    const status = run.error ? "failed" : agentStatus(output);
+    const verified = hasVerifiedToolResult(events, run.runId);
+    const unresolved = hasUnresolvedCondition(output);
+    addCycleEvent(cycleId, "factory.iteration.completed", { iteration, runId: run.runId, status, verified, unresolved, robotCadCompiled: verified });
+    if (status !== "completed" || !verified || unresolved) {
+      if (iteration === maxIterations) {
+        transitionProjectStage(projectId, "design", "blocked", { error: run.error ?? "Bounded cycle ended without a verified resolved result." });
+        finishFactoryCycle(cycleId, "needs_review");
+        if (output) addCycleEvent(cycleId, "factory.conversation.assistant", { message: output, runId: run.runId });
+        return { cycleId, status: "needs_review" as const, iterations: results };
+      }
+      continue;
+    }
+    transitionProjectStage(projectId, "design", "passed");
+    transitionProjectStage(projectId, "verification", "passed");
+    finishFactoryCycle(cycleId, "completed");
+    addCycleEvent(cycleId, "factory.verification.completed", { iteration, verified: true, planId: plan.id, robotCadCompiled: verified });
+    addCycleEvent(cycleId, "factory.cycle.completed", { status: "completed", iterations: iteration, planId: plan.id });
+    if (output) addCycleEvent(cycleId, "factory.conversation.assistant", { message: output, runId: run.runId });
+    return { cycleId, status: "completed" as const, iterations: iteration };
+  }
+  finishFactoryCycle(cycleId, "needs_review");
+  return { cycleId, status: "needs_review" as const, iterations: results };
+}
+
+async function respondWithPlanningDecision(cycleId: string, decision: { action: "clarify" | "none"; message?: string }, planningError?: string) {
+  const message = decision.message?.trim() || (decision.action === "clarify" ? "I need a little more information before I can make a safe engineering plan." : "I’m ready when you have an engineering request.");
+  if (planningError) addCycleEvent(cycleId, "factory.planning.failed", { error: planningError });
+  addCycleEvent(cycleId, "factory.conversation.assistant", { message, mode: "planning" });
+  finishFactoryCycle(cycleId, "completed");
+  return { cycleId, status: "completed" as const, mode: "planning" as const, output: message };
+}
+
+export async function runFactory(request: FactoryRequest, hooks: FactoryCycleHooks = {}) {
+  const normalized = FactoryRequest.parse(request);
+  const cycleId = createFactoryCycle(normalized.projectId, normalized.objective, normalized.constraints);
+  hooks.onCycleCreated?.(cycleId);
+  addCycleEvent(cycleId, "factory.conversation.user", { message: normalized.objective });
+  try {
+    if (!isEngineeringRequest(normalized.objective)) {
+      const conversation = await generateConversationResponse(normalized.projectId, conversationHistory(cycleId), cycleId);
+      finishFactoryCycle(cycleId, "completed");
+      if (conversation.output) addCycleEvent(cycleId, "factory.conversation.assistant", { message: conversation.output, mode: "conversation", runId: conversation.runId });
+      return { cycleId, status: conversation.error ? "failed" : "completed", iterations: [], mode: "conversation", output: conversation.output, error: conversation.error };
+    }
+
+    const plan = isRobotCadObjective(normalized.objective)
+      ? await requestRobotExecutionPlan(cycleId, normalized.projectId, normalized.objective, normalized.constraints)
+      : await requestPlan(cycleId, normalized.projectId, normalized.objective, normalized.constraints, null);
+
+    if (!plan) {
+      const events = listCycleEvents(cycleId) as unknown as Array<{ type: string; payload: string }>;
+      const latest = events.filter(event => event.type === "factory.planning.completed").at(-1);
+      const decision = latest ? JSON.parse(latest.payload) as { action: "clarify" | "none"; message?: string } : { action: "clarify" as const, message: "I could not create an engineering plan yet. Please clarify what you want built or changed." };
+      return respondWithPlanningDecision(cycleId, decision);
+    }
+    updateFactoryCycleObjective(cycleId, plan.objective);
+    return executePlan(cycleId, normalized.projectId, plan, normalized.objective, normalized.maxIterations);
+  } catch (error) {
+    finishFactoryCycle(cycleId, "failed");
+    addCycleEvent(cycleId, "factory.cycle.failed", { error: String(error) });
+    throw error;
+  }
+}
+
+export async function continueFactoryCycle(request: FactoryFollowUpRequest) {
+  const normalized = FactoryFollowUpRequest.parse(request);
+  const cycle = getFactoryCycle(normalized.cycleId) as { project_id: string; status: string; objective: string } | undefined;
+  if (!cycle) throw new Error("cycle not found");
+  if (cycle.status === "running") throw new Error("cycle is already running");
+  addCycleEvent(normalized.cycleId, "factory.conversation.user", { message: normalized.message });
+  try {
+    const currentPlan = getPlan(cycle.project_id);
+    if (isExecutionControl(normalized.message)) {
+      if (!currentPlan) {
+        const message = "There is no active engineering plan to retry yet. Tell me what you want to build or change first.";
+        addCycleEvent(normalized.cycleId, "factory.conversation.assistant", { message, mode: "conversation" });
+        finishFactoryCycle(normalized.cycleId, "completed");
+        return { cycleId: normalized.cycleId, status: "completed" as const, mode: "conversation" as const, output: message };
+      }
+      return executePlan(normalized.cycleId, cycle.project_id, currentPlan, normalized.message, 2);
+    }
+    if (!isEngineeringRequest(normalized.message)) {
+      const conversation = await generateConversationResponse(cycle.project_id, conversationHistory(normalized.cycleId), normalized.cycleId);
+      if (conversation.output) addCycleEvent(normalized.cycleId, "factory.conversation.assistant", { message: conversation.output, mode: "conversation", runId: conversation.runId });
+      finishFactoryCycle(normalized.cycleId, conversation.error ? "failed" : "completed");
+      return { cycleId: normalized.cycleId, status: conversation.error ? "failed" : "completed", mode: "conversation" as const, run: conversation, output: conversation.output, error: conversation.error };
+    }
+    const plan = await requestPlan(normalized.cycleId, cycle.project_id, normalized.message, [], currentPlan);
+    if (!plan) {
+      const events = listCycleEvents(normalized.cycleId) as unknown as Array<{ type: string; payload: string }>;
+      const latest = events.filter(event => event.type === "factory.planning.completed").at(-1);
+      const decision = latest ? JSON.parse(latest.payload) as { action: "clarify" | "none"; message?: string } : { action: "clarify" as const, message: "I need a little more information before I can revise the engineering plan." };
+      return respondWithPlanningDecision(normalized.cycleId, decision);
+    }
+    updateFactoryCycleObjective(normalized.cycleId, plan.objective);
+    return executePlan(normalized.cycleId, cycle.project_id, plan, normalized.message, 2);
+  } catch (error) {
+    finishFactoryCycle(normalized.cycleId, "failed");
+    addCycleEvent(normalized.cycleId, "factory.cycle.failed", { error: String(error) });
+    throw error;
+  }
+}
