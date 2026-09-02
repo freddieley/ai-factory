@@ -4,7 +4,7 @@ import { addEvent, finishRun } from "./db.js";
 import { fusion } from "./fusion.js";
 import { executeCapability } from "./capabilities.js";
 import { parseRobotDesignTransport, robotDesignHash } from "./robot-design.js";
-import { withAbortTimeout } from "./execution.js";
+import { withAbortTimeout, withTimeout } from "./execution.js";
 
 const ROBOT_SYSTEM = `You are the mechanical design model for AI Factory. You author the robot design; the deterministic factory validates it and executes it in Fusion.
 
@@ -44,8 +44,8 @@ function sameDesign(a: unknown, b: unknown): boolean {
 export async function runRobotAgent({ projectId, prompt, cycleId, runId, client, info }: RobotAgentArgs) {
   try {
     try {
-      await withAbortTimeout(signal => fusion.connect(), { signal }, config.TOOL_TIMEOUT_MS, "Fusion connection").catch(() => fusion.connect());
-      await fusion.refresh();
+      await withTimeout(fusion.connect(), config.TOOL_TIMEOUT_MS, "Fusion connection");
+      await withTimeout(fusion.refresh(), config.TOOL_TIMEOUT_MS, "Fusion tool discovery");
       if (!fusion.isConnected()) throw new Error("Fusion MCP did not report a connected state.");
       addEvent(runId, "fusion.connected", { tools: fusion.getTools().map(tool => tool.name), mode: "robot-json-design" });
     } catch (error) {
@@ -66,7 +66,7 @@ export async function runRobotAgent({ projectId, prompt, cycleId, runId, client,
       }
 
       const modelStarted = Date.now();
-      addEvent(runId, "model.start", { step: attempt, call: attempt, mode: "robot-json-design" });
+      addEvent(runId, "model.start", { step: attempt, call: attempt, mode: "robot-json-design", provider: info.provider, model: info.model });
       let response: OpenAI.Chat.Completions.ChatCompletion;
       try {
         const timeoutMs = Math.min(Math.max(config.MODEL_TIMEOUT_MS, 120_000), 180_000);
@@ -76,7 +76,7 @@ export async function runRobotAgent({ projectId, prompt, cycleId, runId, client,
           "Robot design model request",
         );
       } catch (error) {
-        addEvent(runId, "model.error", { step: attempt, error: String(error), elapsedMs: Date.now() - modelStarted, mode: "robot-json-design" });
+        addEvent(runId, "model.error", { step: attempt, error: String(error), elapsedMs: Date.now() - modelStarted, mode: "robot-json-design", provider: info.provider, model: info.model });
         throw error;
       }
 
