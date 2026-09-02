@@ -13,9 +13,7 @@ export type RobotCadCompileResult = {
   error?: string;
 };
 
-function py(value: unknown): string {
-  return JSON.stringify(value);
-}
+function py(value: unknown): string { return JSON.stringify(value); }
 
 function compilePart(part: RobotDesign["parts"][number]): { script: string; unsupported: string[] } {
   const unsupported: string[] = [];
@@ -38,18 +36,22 @@ function compilePart(part: RobotDesign["parts"][number]): { script: string; unsu
       }
       case "rectangle": {
         const sketch = op.inputs.length ? `refs[${py(op.inputs[0])}]` : "None";
-        if (sketch === "None") { unsupported.push(`${part.id}:${op.id}:rectangle-without-sketch`); break; }
         const w = Number(op.parameters.widthMm ?? 0) / 10;
         const h = Number(op.parameters.heightMm ?? 0) / 10;
-        if (!(w > 0 && h > 0)) { unsupported.push(`${part.id}:${op.id}:rectangle-dimensions`); break; }
-        lines.push(`${ref} = ${sketch}.sketchCurves.sketchLines.addTwoPointRectangle(adsk.core.Point3D.create(0,0,0), adsk.core.Point3D.create(${w},${h},0))`);
+        if (sketch === "None" || !(w > 0 && h > 0)) { unsupported.push(`${part.id}:${op.id}:rectangle-dimensions`); break; }
+        const centered = op.parameters.centered === true;
+        const x0 = centered ? -w / 2 : 0;
+        const y0 = centered ? -h / 2 : 0;
+        lines.push(`${sketch}.sketchCurves.sketchLines.addTwoPointRectangle(adsk.core.Point3D.create(${x0},${y0},0), adsk.core.Point3D.create(${x0 + w},${y0 + h},0))`, `${ref} = ${sketch}`);
         break;
       }
       case "circle": {
         const sketch = op.inputs.length ? `refs[${py(op.inputs[0])}]` : "None";
         const r = Number(op.parameters.radiusMm ?? 0) / 10;
-        if (sketch === "None" || !(r > 0)) { unsupported.push(`${part.id}:${op.id}:circle-input-or-radius`); break; }
-        lines.push(`${ref} = ${sketch}.sketchCurves.sketchCircles.addByCenterRadius(adsk.core.Point3D.create(0,0,0), ${r})`);
+        const x = Number(op.parameters.centerX ?? 0) / 10;
+        const y = Number(op.parameters.centerY ?? 0) / 10;
+        if (sketch === "None" || !(r > 0) || !Number.isFinite(x) || !Number.isFinite(y)) { unsupported.push(`${part.id}:${op.id}:circle-input-or-radius`); break; }
+        lines.push(`${sketch}.sketchCurves.sketchCircles.addByCenterRadius(adsk.core.Point3D.create(${x},${y},0), ${r})`, `${ref} = ${sketch}`);
         break;
       }
       case "extrude": {
@@ -57,6 +59,15 @@ function compilePart(part: RobotDesign["parts"][number]): { script: string; unsu
         const distance = Number(op.parameters.distanceMm ?? 0) / 10;
         if (sketch === "None" || !(distance > 0)) { unsupported.push(`${part.id}:${op.id}:extrude-input-or-distance`); break; }
         lines.push(`profile = ${sketch}.profiles.item(0)`, `input = features.extrudeFeatures.createInput(profile, adsk.fusion.FeatureOperations.NewBodyFeatureOperation)`, `input.setDistanceExtent(False, adsk.core.ValueInput.createByReal(${distance}))`, `${ref} = features.extrudeFeatures.add(input)`, `if not ${ref}: raise RuntimeError(${py(`Extrusion failed for ${part.id}:${op.id}`)})`);
+        break;
+      }
+      case "transform": {
+        const source = op.inputs.length ? `refs[${py(op.inputs[0])}]` : "None";
+        const rotationDeg = Number(op.parameters.rotationDeg ?? 0);
+        const tx = Number(op.parameters.translateXmm ?? 0) / 10;
+        const ty = Number(op.parameters.translateYmm ?? 0) / 10;
+        if (source === "None" || !Number.isFinite(rotationDeg) || !Number.isFinite(tx) || !Number.isFinite(ty)) { unsupported.push(`${part.id}:${op.id}:transform-input-or-parameters`); break; }
+        lines.push(`body = ${source}.bodies.item(0)`, `matrix = adsk.core.Matrix3D.create()`, `matrix.setToRotation(${rotationDeg} * 3.141592653589793 / 180.0, adsk.core.Vector3D.create(0,0,1), adsk.core.Point3D.create(0,0,0))`, `matrix.translation = adsk.core.Vector3D.create(${tx},${ty},0)`, `if not body.transformBy(matrix): raise RuntimeError(${py(`Transform failed for ${part.id}:${op.id}`)})`, `${ref} = ${source}`);
         break;
       }
       default:
