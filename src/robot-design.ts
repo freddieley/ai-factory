@@ -51,7 +51,25 @@ function assertOutputReachability(operations: RobotGeometryOperation[], outputOp
     reachable.add(id); for (const input of operation.inputs) visit(input);
   };
   visit(outputOperationId);
-  const disconnected = operations.filter(operation => !reachable.has(operation.id)).map(operation => operation.id);
+  let addedAlias = true;
+  while (addedAlias) {
+    addedAlias = false;
+    for (const operation of operations) {
+      if (reachable.has(operation.id) || !["rectangle", "circle"].includes(operation.op)) continue;
+      if (operation.inputs.some(input => reachable.has(input))) {
+        reachable.add(operation.id);
+        addedAlias = true;
+      }
+    }
+  }
+  const disconnected = operations.filter(operation => {
+    if (reachable.has(operation.id)) return false;
+    if (operation.op !== "transform" || operation.inputs.length === 0 || !reachable.has(operation.inputs[0])) return true;
+    const parameters = operation.parameters;
+    const hasRotation = typeof parameters.rotationDeg === "number" || typeof parameters.rotateDeg === "number";
+    const hasTranslation = typeof parameters.translateXmm === "number" && typeof parameters.translateYmm === "number" || typeof parameters.translateX === "number" && typeof parameters.translateY === "number";
+    return !hasRotation && !hasTranslation;
+  }).map(operation => operation.id);
   if (disconnected.length) throw new Error(`Geometry operation graph for ${partId} contains disconnected operations not contributing to outputOperationId ${outputOperationId}: ${disconnected.join(", ")}.`);
 }
 
@@ -73,7 +91,7 @@ function normalizeScalarParameters(parameters: Record<string, unknown>): Record<
 function transportVariants(text: string): string[] {
   const variants = new Set<string>([text]);
   const add = (candidate: string) => { if (candidate && candidate !== text) variants.add(candidate); };
-  add(text.replace(/^\"([\\s\\S]*)\"$/u, "$1"));
+  add(text.replace(/^"([\s\S]*)"$/u, "$1"));
   add(text.replace(/\\\"/g, '"'));
   add(text.replace(/\\\\/g, "\\"));
   add(text.replace(/\\\\/g, "\\").replace(/\\\"/g, '"'));
