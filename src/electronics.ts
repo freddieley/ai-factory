@@ -63,12 +63,12 @@ function numericRequirementWithUnit(requirement: ElectronicsRequirement, unit: s
 
 function inferBlockType(requirement: ElectronicsRequirement): z.infer<typeof FunctionalBlockType> {
   const text = normalizedText(requirement);
-  if (/(mcu|microcontroller|controller|processor|cpu|compute)/.test(text)) return "controller";
-  if (/(motor|servo|esc|actuator|pump|valve|solenoid)/.test(text)) return "actuator";
-  if (/(sensor|imu|camera|lidar|encoder|gps|accelerometer|gyroscope)/.test(text)) return "sensor";
-  if (/(wifi|wi-fi|bluetooth|ble|can|ethernet|uart|i2c|spi|radio|wireless|usb)/.test(text)) return "communications";
-  if (/(fuse|overcurrent|protection|emergency|safety|shutdown|interlock)/.test(text)) return "safety";
-  if (/(voltage|current|power|battery|supply|rail|vbus|vin)/.test(text) || requirement.unit?.toUpperCase() === "V" || requirement.unit?.toUpperCase() === "A") return "power";
+  if (/\b(?:mcu|microcontroller|controller|processor|cpu|compute)\b/.test(text)) return "controller";
+  if (/\b(?:motor|servo|esc|actuator|pump|valve|solenoid)\b/.test(text)) return "actuator";
+  if (/\b(?:sensor|imu|camera|lidar|encoder|gps|accelerometer|gyroscope)\b/.test(text)) return "sensor";
+  if (/\b(?:wifi|wi-fi|bluetooth|ble|can|ethernet|uart|i2c|spi|radio|wireless|usb)\b/.test(text)) return "communications";
+  if (/\b(?:fuse|overcurrent|protection|emergency|safety|shutdown|interlock)\b/.test(text)) return "safety";
+  if (/\b(?:voltage|current|power|battery|supply|rail|vbus|vin)\b/.test(text) || requirement.unit?.toUpperCase() === "V" || requirement.unit?.toUpperCase() === "A") return "power";
   return "other";
 }
 

@@ -34,6 +34,15 @@ describe("requirements-driven electronics architecture", () => {
     ]);
     expect(architecture.powerDomains).toEqual([{ name: "12 V rail", nominalVoltageV: 12, requirementIds: ["ER-POWER"] }]);
     expect(architecture.systemMaxCurrentA).toBe(5);
+    expect(architecture.functionalBlocks.map(block => block.type)).toEqual(["power"]);
+  });
+
+  it("does not classify ordinary words containing engineering keywords as components", () => {
+    const architecture = buildRequirementsDrivenElectronicsArchitecture([
+      { id: "ER-1", description: "12 V input, maximum 5 A", value: 12, unit: "V" },
+      { id: "ER-2", description: "maximum ambient temperature 40 C", priority: "must" },
+    ]);
+    expect(architecture.functionalBlocks.map(block => block.type)).toEqual(["power", "other"]);
   });
 
   it("keeps the result deterministic for the same requirement set", () => {
