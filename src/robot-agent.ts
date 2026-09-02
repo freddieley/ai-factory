@@ -4,6 +4,7 @@ import { addEvent, finishRun } from "./db.js";
 import { fusion } from "./fusion.js";
 import { executeCapability } from "./capabilities.js";
 import { parseRobotDesignTransport, robotDesignHash } from "./robot-design.js";
+import { withAbortTimeout } from "./execution.js";
 
 const ROBOT_SYSTEM = `You are the mechanical design model for AI Factory. You author the robot design; the deterministic factory validates it and executes it in Fusion.
 
@@ -43,7 +44,7 @@ function sameDesign(a: unknown, b: unknown): boolean {
 export async function runRobotAgent({ projectId, prompt, cycleId, runId, client, info }: RobotAgentArgs) {
   try {
     try {
-      await fusion.connect();
+      await withAbortTimeout(signal => fusion.connect(), { signal }, config.TOOL_TIMEOUT_MS, "Fusion connection").catch(() => fusion.connect());
       await fusion.refresh();
       if (!fusion.isConnected()) throw new Error("Fusion MCP did not report a connected state.");
       addEvent(runId, "fusion.connected", { tools: fusion.getTools().map(tool => tool.name), mode: "robot-json-design" });
@@ -68,12 +69,12 @@ export async function runRobotAgent({ projectId, prompt, cycleId, runId, client,
       addEvent(runId, "model.start", { step: attempt, call: attempt, mode: "robot-json-design" });
       let response: OpenAI.Chat.Completions.ChatCompletion;
       try {
-        response = await client.chat.completions.create({
-          model: info.model,
-          temperature: config.TEMPERATURE,
-          max_tokens: 5000,
-          messages,
-        });
+        const timeoutMs = Math.min(Math.max(config.MODEL_TIMEOUT_MS, 120_000), 180_000);
+        response = await withAbortTimeout(
+          signal => client.chat.completions.create({ model: info.model, temperature: config.TEMPERATURE, max_tokens: 5000, messages }, { signal }),
+          timeoutMs,
+          "Robot design model request",
+        );
       } catch (error) {
         addEvent(runId, "model.error", { step: attempt, error: String(error), elapsedMs: Date.now() - modelStarted, mode: "robot-json-design" });
         throw error;
