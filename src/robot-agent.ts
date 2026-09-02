@@ -1,10 +1,18 @@
-import OpenAI from "openai";
 import { config } from "./config.js";
 import { addEvent, finishRun } from "./db.js";
 import { fusion } from "./fusion.js";
 import { executeCapability } from "./capabilities.js";
 import { parseRobotDesignTransport, robotDesignHash } from "./robot-design.js";
 import { withAbortTimeout, withTimeout } from "./execution.js";
+
+type RobotAgentArgs = {
+  projectId: string;
+  prompt: string;
+  cycleId?: string;
+  runId: string;
+  client: any;
+  info: { provider: string; model: string };
+};
 
 const ROBOT_SYSTEM = `You are the mechanical design model for AI Factory. You author the robot design; the deterministic factory validates it and executes it in Fusion.
 
@@ -18,15 +26,6 @@ Executable CAD operations are: sketch, rectangle, circle, extrude, transform. Re
 Design the requested object yourself. Do not use a factory template and do not invent geometry outside the request. Interpret overall dimensions such as a 300 mm frame span as plan-view size, never as extrusion thickness. If a requirement is underspecified, make a conservative engineering assumption and record it in unresolvedQuestions. Keep geometry in millimetres. Fixed assembly joints require two real part IDs; use joints: [] when there is no true two-part assembly relationship.
 
 The design must be mechanically coherent: repeated components should occupy distinct intended positions, thin structural members should have sensible thickness, and mounting features must not be accidentally duplicated or left disconnected.`;
-
-type RobotAgentArgs = {
-  projectId: string;
-  prompt: string;
-  cycleId?: string;
-  runId: string;
-  client: OpenAI;
-  info: { provider: string; model: string };
-};
 
 function unwrapResult(result: unknown): string {
   const text = JSON.stringify(result);
@@ -43,19 +42,14 @@ function sameDesign(a: unknown, b: unknown): boolean {
 
 export async function runRobotAgent({ projectId, prompt, cycleId, runId, client, info }: RobotAgentArgs) {
   try {
-    try {
-      await withTimeout(fusion.connect(), config.TOOL_TIMEOUT_MS, "Fusion connection");
-      await withTimeout(fusion.refresh(), config.TOOL_TIMEOUT_MS, "Fusion tool discovery");
-      if (!fusion.isConnected()) throw new Error("Fusion MCP did not report a connected state.");
-      addEvent(runId, "fusion.connected", { tools: fusion.getTools().map(tool => tool.name), mode: "robot-json-design" });
-    } catch (error) {
-      addEvent(runId, "fusion.unavailable", { error: String(error), mode: "robot-json-design" });
-      throw error;
-    }
+    await withTimeout(fusion.connect(), config.TOOL_TIMEOUT_MS, "Fusion connection");
+    await withTimeout(fusion.refresh(), config.TOOL_TIMEOUT_MS, "Fusion tool discovery");
+    if (!fusion.isConnected()) throw new Error("Fusion MCP did not report a connected state.");
+    addEvent(runId, "fusion.connected", { tools: fusion.getTools().map(tool => tool.name), mode: "robot-json-design" });
 
     let previousDesign: unknown = null;
     let previousError = "";
-    const messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
+    const messages: any[] = [
       { role: "system", content: ROBOT_SYSTEM },
       { role: "user", content: `Project ID: ${projectId}\n\nBuild request:\n${prompt}` },
     ];
@@ -67,7 +61,7 @@ export async function runRobotAgent({ projectId, prompt, cycleId, runId, client,
 
       const modelStarted = Date.now();
       addEvent(runId, "model.start", { step: attempt, call: attempt, mode: "robot-json-design", provider: info.provider, model: info.model });
-      let response: OpenAI.Chat.Completions.ChatCompletion;
+      let response: any;
       try {
         const timeoutMs = Math.min(Math.max(config.MODEL_TIMEOUT_MS, 120_000), 180_000);
         response = await withAbortTimeout(
@@ -80,8 +74,8 @@ export async function runRobotAgent({ projectId, prompt, cycleId, runId, client,
         throw error;
       }
 
-      const message = response.choices[0]?.message;
-      const content = message?.content?.trim() ?? "";
+      const message = response?.choices?.[0]?.message;
+      const content = typeof message?.content === "string" ? message.content.trim() : "";
       addEvent(runId, "model.message", { step: attempt, elapsedMs: Date.now() - modelStarted, content: content || null, toolCalls: [], mode: "robot-json-design" });
       if (!content) {
         previousError = "Model returned an empty design response.";
@@ -128,6 +122,7 @@ export async function runRobotAgent({ projectId, prompt, cycleId, runId, client,
     return { runId, output: "", error: failure, provider: info };
   } catch (error) {
     const message = String(error);
+    addEvent(runId, "fusion.or.robot.failed", { error: message });
     addEvent(runId, "run.failed", { error: message, mode: "robot-json-design" });
     finishRun(runId, "failed", "");
     return { runId, output: "", error: message, provider: info };
