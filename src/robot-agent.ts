@@ -16,20 +16,24 @@ type RobotAgentArgs = {
 
 const ROBOT_SYSTEM = `You are the mechanical design model for AI Factory. You author the robot design; the deterministic factory validates it and executes it in Fusion.
 
-Return ONLY one complete JSON object matching ai-factory.robot-design/v1. Do not return markdown, prose, a JSON string, or a function/tool call.
+Return ONLY one complete JSON object matching ai-factory.robot-design/v1. Never return markdown, prose, a JSON string, or a tool call.
 
-Required top-level fields: schema, name, mission, requirements, parts, joints, designRationale, unresolvedQuestions.
-Each part requires id, name, material, manufacturingProcess, geometry. Geometry requires schema ai-factory.robot-geometry/v1, units mm, operations, outputOperationId. Each operation requires id, op, inputs, parameters.
+Top-level fields MUST be: schema, name, mission, requirements, parts, joints, designRationale, unresolvedQuestions.
+Each part MUST contain id, name, material, manufacturingProcess, geometry. Geometry MUST contain schema ai-factory.robot-geometry/v1, units: "mm", operations, outputOperationId. Every operation MUST contain id, op, inputs, parameters.
 
-Executable CAD operations are: sketch, rectangle, circle, extrude, transform. Rectangle parameters use widthMm, heightMm, centerX, centerY, rotationDeg. Circle uses radiusMm, centerX, centerY. Extrude uses distanceMm for thickness. Use transform to place/rotate a finished body when required. The graph must be connected to outputOperationId and contain no dangling references or cycles.
+SUPPORTED EXECUTABLE OPS ARE ONLY: sketch, rectangle, circle, extrude, transform.
+For every operation, inputs is ALWAYS an array of STRING operation IDs, never objects. Do not write {"id":"..."} inside inputs.
+Parameters are JSON values, but executable geometry uses these exact fields: rectangle = widthMm, heightMm, centerX, centerY, rotationDeg; circle = radiusMm, centerX, centerY; extrude = distanceMm; transform = rotationDeg/rotateDeg plus translateXmm/translateYmm or translateX/translateY.
+A sketch normally has parameters {"plane":"XY"} or {}. Do NOT put an array of geometry operations inside sketch.parameters unless you are deliberately using the supported nested-sketch compatibility form.
+Every part MUST set outputOperationId to the final operation ID. No missing, dangling, or cyclic references.
 
-Design the requested object yourself. Do not use a factory template and do not invent geometry outside the request. Interpret overall dimensions such as a 300 mm frame span as plan-view size, never as extrusion thickness. If a requirement is underspecified, make a conservative engineering assumption and record it in unresolvedQuestions. Keep geometry in millimetres. Fixed assembly joints require two real part IDs; use joints: [] when there is no true two-part assembly relationship.
+designRationale MUST be an ARRAY OF STRINGS. unresolvedQuestions MUST be an ARRAY OF STRINGS. A joint, when present, MUST use {id,parentPartId,childPartId,type} where type is fixed, revolute, prismatic, spherical, or planar. Do not use partIds, part1Id, part2Id, or jointType. Use joints: [] unless a real two-part assembly relationship is required.
 
-The design must be mechanically coherent: repeated components should occupy distinct intended positions, thin structural members should have sensible thickness, and mounting features must not be accidentally duplicated or left disconnected.`;
+Design the requested object yourself. Do not use a factory template. Interpret overall dimensions such as a 300 mm frame span as plan-view dimensions, never as extrusion thickness. Make conservative engineering assumptions when the request is underspecified and record them in unresolvedQuestions. Keep structural thickness physically sensible. Repeated components must be placed at distinct intended positions using transform or explicit rectangle/circle centers. The final graph must represent the requested geometry, not merely placeholders.`;
 
-function unwrapResult(result: unknown): string {
-  const text = JSON.stringify(result);
-  return text.length > 8_000 ? `${text.slice(0, 8_000)}\n[truncated]` : text;
+function compactEvidence(value: unknown, maxLength = 4_000): string {
+  const text = JSON.stringify(value);
+  return text.length > maxLength ? `${text.slice(0, maxLength)}\n[truncated]` : text;
 }
 
 function sameDesign(a: unknown, b: unknown): boolean {
@@ -38,6 +42,10 @@ function sameDesign(a: unknown, b: unknown): boolean {
   } catch {
     return JSON.stringify(a) === JSON.stringify(b);
   }
+}
+
+function buildRetryPrompt(originalPrompt: string, error: string, attempt: number): string {
+  return `Build request:\n${originalPrompt}\n\nThis is correction attempt ${attempt}. The deterministic factory rejected the prior submission. Fix the evidence below instead of repeating the prior structure.\n\nREJECTION EVIDENCE:\n${error}\n\nHard contract reminders:\n- Return exactly one complete JSON object.\n- inputs contains strings only.\n- designRationale and unresolvedQuestions are arrays of strings.\n- joints use parentPartId, childPartId, and type; otherwise use joints: [].\n- Do not nest arbitrary operation arrays inside parameters.\n- outputOperationId must exist for every part.\n- Keep geometry physically sensible and place repeated parts distinctly.\n\nReturn ONLY the corrected JSON object.`;
 }
 
 export async function runRobotAgent({ projectId, prompt, cycleId, runId, client, info }: RobotAgentArgs) {
@@ -49,15 +57,17 @@ export async function runRobotAgent({ projectId, prompt, cycleId, runId, client,
 
     let previousDesign: unknown = null;
     let previousError = "";
-    const messages: any[] = [
-      { role: "system", content: ROBOT_SYSTEM },
-      { role: "user", content: `Project ID: ${projectId}\n\nBuild request:\n${prompt}` },
-    ];
 
-    for (let attempt = 1; attempt <= 2; attempt++) {
-      if (attempt > 1) {
-        messages.push({ role: "user", content: `The deterministic factory rejected the previous design with this exact evidence:\n${previousError}\n\nCreate a materially corrected design. Do not repeat the previous design. Return ONLY the complete JSON object.` });
-      }
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      const modelMessages = attempt === 1
+        ? [
+            { role: "system", content: ROBOT_SYSTEM },
+            { role: "user", content: `Project ID: ${projectId}\n\nBuild request:\n${prompt}` },
+          ]
+        : [
+            { role: "system", content: ROBOT_SYSTEM },
+            { role: "user", content: buildRetryPrompt(prompt, previousError, attempt) },
+          ];
 
       const modelStarted = Date.now();
       addEvent(runId, "model.start", { step: attempt, call: attempt, mode: "robot-json-design", provider: info.provider, model: info.model });
@@ -65,7 +75,13 @@ export async function runRobotAgent({ projectId, prompt, cycleId, runId, client,
       try {
         const timeoutMs = Math.min(Math.max(config.MODEL_TIMEOUT_MS, 120_000), 180_000);
         response = await withAbortTimeout(
-          signal => client.chat.completions.create({ model: info.model, temperature: config.TEMPERATURE, max_tokens: 5000, messages }, { signal }),
+          signal => client.chat.completions.create({
+            model: info.model,
+            temperature: attempt === 1 ? config.TEMPERATURE : 0,
+            max_tokens: 7000,
+            messages: modelMessages,
+            response_format: { type: "json_object" },
+          }, { signal }),
           timeoutMs,
           "Robot design model request",
         );
@@ -110,14 +126,14 @@ export async function runRobotAgent({ projectId, prompt, cycleId, runId, client,
           finishRun(runId, "completed", output);
           return { runId, output, provider: info };
         }
-        previousError = `Robot CAD compiler returned without verified success: ${unwrapResult(result)}`;
+        previousError = `Robot CAD compiler returned without verified success: ${compactEvidence(result)}`;
       } catch (error) {
         previousError = String(error);
         addEvent(runId, "tool.error", { step: attempt, toolName: "ai_factory_submit_robot_design", elapsedMs: Date.now() - toolStarted, error: previousError, mode: "robot-json-design" });
       }
     }
 
-    const failure = `Robot CAD submission failed after 2 model-authored attempts. Last deterministic evidence: ${previousError}`;
+    const failure = `Robot CAD submission failed after 3 model-authored attempts. Last deterministic evidence: ${previousError}`;
     finishRun(runId, "failed", "");
     return { runId, output: "", error: failure, provider: info };
   } catch (error) {
