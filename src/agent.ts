@@ -28,8 +28,14 @@ function compactMessages(messages: OpenAI.Chat.Completions.ChatCompletionMessage
   const initialUser = messages[1];
   const suffix = messages.slice(2);
   let start = Math.max(0, suffix.length - 12);
-  while (start > 0 && suffix[start]?.role === "tool") start--;
-  while (start < suffix.length && suffix[start]?.role === "assistant" && "tool_calls" in suffix[start] && suffix[start].tool_calls?.length) {
+  while (start > 0) {
+    const candidate = suffix[start];
+    if (candidate?.role !== "tool") break;
+    start--;
+  }
+  while (start < suffix.length) {
+    const candidate = suffix[start];
+    if (candidate?.role !== "assistant" || !("tool_calls" in candidate) || !candidate.tool_calls?.length) break;
     start++;
     while (start < suffix.length && suffix[start]?.role === "tool") start++;
   }
@@ -70,18 +76,11 @@ export async function runAgent(projectId: string, prompt: string, cycleId?: stri
   const runId = createRun(projectId, prompt, info.provider, info.model, cycleId);
   const robotMode = isRobotCadRequest(prompt);
 
-  // Robot CAD gets a dedicated JSON-design path. This avoids forcing a local model to
-  // synthesize a large nested function-call payload and removes the generic agent loop
-  // as a source of transport/retry failures.
   if (robotMode) {
     return runRobotAgent({ projectId, prompt, cycleId, runId, client, info });
   }
 
-  const controller = new ExecutionController({
-    maxModelCalls: config.MAX_MODEL_CALLS,
-    maxToolCalls: config.MAX_TOOL_CALLS,
-    maxWallMs: config.MAX_RUN_MS,
-  });
+  const controller = new ExecutionController({ maxModelCalls: config.MAX_MODEL_CALLS, maxToolCalls: config.MAX_TOOL_CALLS, maxWallMs: config.MAX_RUN_MS });
 
   try {
     let fusionAvailable = false;
@@ -123,13 +122,7 @@ export async function runAgent(projectId: string, prompt: string, cycleId?: stri
       if (!message) throw new Error("Model returned no message.");
       messages.push(message);
       const functionToolCalls = getFunctionToolCalls(message.tool_calls);
-      addEvent(runId, "model.message", {
-        step,
-        elapsedMs: Date.now() - modelStarted,
-        content: message.content ?? null,
-        toolCalls: functionToolCalls.map(call => call.function.name),
-        budget: controller.summary(),
-      });
+      addEvent(runId, "model.message", { step, elapsedMs: Date.now() - modelStarted, content: message.content ?? null, toolCalls: functionToolCalls.map(call => call.function.name), budget: controller.summary() });
 
       if (functionToolCalls.length === 0) {
         const output = message.content?.trim() ?? "";
