@@ -55,6 +55,7 @@ describe("robot CAD compiler", () => {
       { id: "rotated", op: "transform", inputs: ["solid"], parameters: { rotationDeg: 90, translateXmm: 0, translateYmm: 0 } },
     ], outputOperationId: "rotated" } }] });
     expect(result.unsupportedOperations).toEqual([]);
+    expect(result.script).toContain("solidByInput[\"solid\"] = body");
     expect(result.script).toContain("body.transformBy(matrix)");
     expect(result.script).toContain("setToRotation");
   });
