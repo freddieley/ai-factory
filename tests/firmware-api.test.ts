@@ -18,8 +18,11 @@ describe("firmware generation API", () => {
   });
   it("runs and persists the generated firmware through host HIL", async () => {
     const generated = await app.inject({ method: "POST", url: `/api/projects/${projectId}/firmware/generate`, payload: { architecture, target: { name: "hil-board", architecture: "portable-cpp", board: "generic" } } });
-    const project = generated.json().project;
-    const response = await app.inject({ method: "POST", url: `/api/projects/${projectId}/firmware/hil`, payload: { project } });
+    const project = generated.json().project; const response = await app.inject({ method: "POST", url: `/api/projects/${projectId}/firmware/hil`, payload: { project } });
     expect(response.statusCode).toBe(200); expect(response.json()).toMatchObject({ result: { schema: "ai-factory.firmware-hil/v1", status: "pass", events: [{ sequence: 1 }] } });
+  });
+  it("plans physical flashing without executing it", async () => {
+    const response = await app.inject({ method: "POST", url: `/api/projects/${projectId}/firmware/flash-plan`, payload: { tool: "dfu-util", artifactPath: "firmware.bin", device: "0483:df11" } });
+    expect(response.statusCode).toBe(200); expect(response.json()).toMatchObject({ plan: { schema: "ai-factory.firmware-flash-plan/v1", command: ["dfu-util", "-d", "0483:df11", "-D", "firmware.bin"] } });
   });
 });
