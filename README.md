@@ -20,9 +20,11 @@ See **[GOAL.md](./GOAL.md)** for the complete end-state specification and design
 - [x] Requirements-driven electronics architecture — deterministic architecture synthesis from project electrical requirements, requirement traceability, power-domain extraction, functional blocks, interface identification, explicit open questions, capability discovery, API execution, hash-identified artifact persistence, and unit/API regression coverage.
 - [x] Schematic and PCB design tool integration — real KiCad CLI integration for project-scoped schematic ERC, PCB DRC, optional netlist export, structured validation reports, path isolation, persisted validation artifacts, and KiCad 9 CI integration tests.
 - [x] Component selection and electrical rule checking — deterministic component ranking and selection against the requirements-driven architecture, lifecycle enforcement, voltage/current compatibility, functional and interface coverage, uniqueness checks, explicit ERC pass/fail findings, persisted hash-verified selection artifacts, capability discovery, API execution, and unit/API regression coverage.
-- [ ] Power, thermal, signal-integrity, and interface analysis.
+- [x] Power, thermal, signal-integrity, and interface analysis — deterministic power-budget, thermal, frequency, impedance, termination, logic-voltage, connector, and protocol checks with structured findings, persistence, API coverage, and regression tests.
 - [ ] Firmware generation, build, flashing, logging, and hardware-in-the-loop interfaces.
 - [ ] Electronics BOM, substitutions, lifecycle and procurement integration.
+
+A concrete benign quadrotor flight-controller reference specification now exists in `src/drone-reference.ts`, using the same requirements-driven electronics architecture pipeline rather than a disconnected demo path.
 
 ### Phase 4 — Robotics software factory
 - [ ] Generate robot software architecture from the same product specification.
