@@ -24,7 +24,16 @@ describe("requirements-driven electronics architecture", () => {
       { id: "ER-POWER", description: "Limit input current", value: 8, unit: "A", priority: "must" },
     ]);
     expect(architecture.powerDomains).toEqual([]);
+    expect(architecture.systemMaxCurrentA).toBe(8);
     expect(architecture.openQuestions.some(question => question.includes("input voltage"))).toBe(true);
+  });
+
+  it("extracts current limits embedded alongside a voltage requirement", () => {
+    const architecture = buildRequirementsDrivenElectronicsArchitecture([
+      { id: "ER-POWER", description: "12 V input, maximum 5 A", value: 12, unit: "V", priority: "must" },
+    ]);
+    expect(architecture.powerDomains).toEqual([{ name: "12 V rail", nominalVoltageV: 12, requirementIds: ["ER-POWER"] }]);
+    expect(architecture.systemMaxCurrentA).toBe(5);
   });
 
   it("keeps the result deterministic for the same requirement set", () => {
