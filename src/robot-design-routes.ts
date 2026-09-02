@@ -2,7 +2,7 @@ import { FastifyInstance } from "fastify";
 import { createHash } from "node:crypto";
 import { compileRobotDesignToFusion, compileRobotDesignToFusionScript } from "./robot-cad-compiler.js";
 import { getProject, listArtifacts, createArtifact } from "./db.js";
-import { validateRobotDesign } from "./robot-design.js";
+import { robotDesignHash, validateRobotDesign } from "./robot-design.js";
 
 export function registerRobotDesignRoutes(app: FastifyInstance): void {
   app.post("/api/projects/:id/robot-design/compile", async (request, reply) => {
@@ -14,7 +14,7 @@ export function registerRobotDesignRoutes(app: FastifyInstance): void {
 
     try {
       const design = validateRobotDesign(body.design);
-      const designHash = createHash("sha256").update(JSON.stringify(design)).digest("hex");
+      const designHash = robotDesignHash(design);
       const designArtifactId = createArtifact(id, undefined, "robot_design", design.name, undefined, designHash, {
         schema: design.schema,
         designHash,
