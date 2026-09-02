@@ -69,7 +69,23 @@ function compilePart(part: RobotDesign["parts"][number]): { script: string; unsu
         const sketch = profileInput ? `refs[${py(profileInput)}]` : "None";
         const distance = Number(op.parameters.distanceMm ?? 0) / 10;
         if (sketch === "None" || !(distance > 0)) { unsupported.push(`${part.id}:${op.id}:extrude-input-or-distance`); break; }
-        lines.push(`profile = ${sketch}.profiles.item(0)`, `input = features.extrudeFeatures.createInput(profile, adsk.fusion.FeatureOperations.NewBodyFeatureOperation)`, `input.setDistanceExtent(False, adsk.core.ValueInput.createByReal(${distance}))`, `${ref} = features.extrudeFeatures.add(input)`, `if not ${ref}: raise RuntimeError(${py(`Extrusion failed for ${part.id}:${op.id}`)})`, `solidByInput[${py(profileInput)}] = ${ref}.bodies.item(0)`, `pending = pendingTransforms.get(${py(profileInput)})`, `if pending:`, `    rotationDeg, tx, ty = pending`, `    matrix = adsk.core.Matrix3D.create()`, `    matrix.setToRotation(rotationDeg * 3.141592653589793 / 180.0, adsk.core.Vector3D.create(0,0,1), adsk.core.Point3D.create(0,0,0))`, `    matrix.translation = adsk.core.Vector3D.create(tx,ty,0)`, `    if not ${ref}.bodies.item(0).transformBy(matrix): raise RuntimeError(${py(`Transform failed for ${part.id}:${op.id}`)})`);
+        lines.push(
+          `profile = ${sketch}.profiles.item(0)`,
+          `input = features.extrudeFeatures.createInput(profile, adsk.fusion.FeatureOperations.NewBodyFeatureOperation)`,
+          `input.setDistanceExtent(False, adsk.core.ValueInput.createByReal(${distance}))`,
+          `${ref} = features.extrudeFeatures.add(input)`,
+          `if not ${ref}: raise RuntimeError(${py(`Extrusion failed for ${part.id}:${op.id}`)})`,
+          `body = ${ref}.bodies.item(0)`,
+          `solidByInput[${py(profileInput)}] = body`,
+          `solidByInput[${py(op.id)}] = body`,
+          `pending = pendingTransforms.get(${py(profileInput)})`,
+          `if pending:`,
+          `    rotationDeg, tx, ty = pending`,
+          `    matrix = adsk.core.Matrix3D.create()`,
+          `    matrix.setToRotation(rotationDeg * 3.141592653589793 / 180.0, adsk.core.Vector3D.create(0,0,1), adsk.core.Point3D.create(0,0,0))`,
+          `    matrix.translation = adsk.core.Vector3D.create(tx,ty,0)`,
+          `    if not body.transformBy(matrix): raise RuntimeError(${py(`Transform failed for ${part.id}:${op.id}`)})`,
+        );
         break;
       }
       case "transform": {
@@ -79,7 +95,16 @@ function compilePart(part: RobotDesign["parts"][number]): { script: string; unsu
         const tx = Number(op.parameters.translateXmm ?? op.parameters.translateX ?? 0) / 10;
         const ty = Number(op.parameters.translateYmm ?? op.parameters.translateY ?? 0) / 10;
         if (source === "None" || !Number.isFinite(rotationDeg) || !Number.isFinite(tx) || !Number.isFinite(ty)) { unsupported.push(`${part.id}:${op.id}:transform-input-or-parameters`); break; }
-        lines.push(`if ${py(sourceId)} in solidByInput:`, `    body = solidByInput[${py(sourceId)}]`, `    matrix = adsk.core.Matrix3D.create()`, `    matrix.setToRotation(${rotationDeg} * 3.141592653589793 / 180.0, adsk.core.Vector3D.create(0,0,1), adsk.core.Point3D.create(0,0,0))`, `    matrix.translation = adsk.core.Vector3D.create(${tx},${ty},0)`, `    if not body.transformBy(matrix): raise RuntimeError(${py(`Transform failed for ${part.id}:${op.id}`)})`, `else:`, `    pendingTransforms[${py(sourceId)}] = (${rotationDeg}, ${tx}, ${ty})`);
+        lines.push(
+          `if ${py(sourceId)} in solidByInput:`,
+          `    body = solidByInput[${py(sourceId)}]`,
+          `    matrix = adsk.core.Matrix3D.create()`,
+          `    matrix.setToRotation(${rotationDeg} * 3.141592653589793 / 180.0, adsk.core.Vector3D.create(0,0,1), adsk.core.Point3D.create(0,0,0))`,
+          `    matrix.translation = adsk.core.Vector3D.create(${tx},${ty},0)`,
+          `    if not body.transformBy(matrix): raise RuntimeError(${py(`Transform failed for ${part.id}:${op.id}`)})`,
+          `else:`,
+          `    pendingTransforms[${py(sourceId)}] = (${rotationDeg}, ${tx}, ${ty})`,
+        );
         lines.push(`${ref} = ${source}`);
         break;
       }
