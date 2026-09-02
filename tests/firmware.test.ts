@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { buildFirmwareProject, generateFirmwareProject } from "../src/firmware.js";
-import { parseFirmwareTelemetry, runFirmwareHil } from "../src/firmware-io.js";
+import { parseFirmwareTelemetry, planFirmwareFlash, runFirmwareHil } from "../src/firmware-io.js";
 
 const architecture = {
   schema: "ai-factory.electronics-architecture/v1", name: "controller board",
@@ -24,12 +24,16 @@ describe("firmware generation", () => {
     const result = await buildFirmwareProject(project); expect(result.status).toBe("pass"); expect(result.exitCode).toBe(0);
   });
   it("parses structured heartbeat telemetry", () => {
-    expect(parseFirmwareTelemetry("AI_FACTORY_HEARTBEAT 7")).toMatchObject({ schema: "ai-factory.firmware-telemetry/v1", type: "heartbeat", sequence: 7 });
-    expect(parseFirmwareTelemetry("unrelated output")).toBeNull();
+    expect(parseFirmwareTelemetry("AI_FACTORY_HEARTBEAT 7")).toMatchObject({ schema: "ai-factory.firmware-telemetry/v1", type: "heartbeat", sequence: 7 }); expect(parseFirmwareTelemetry("unrelated output")).toBeNull();
   });
   it("executes the generated firmware through the host HIL interface", async () => {
     const project = generateFirmwareProject(architecture, { name: "test-board", architecture: "portable-cpp", board: "generic" });
     const result = await runFirmwareHil(project); expect(result.status).toBe("pass"); expect(result.events[0]?.sequence).toBe(1);
+  });
+  it("plans physical flashing without executing hardware writes", () => {
+    const plan = planFirmwareFlash({ tool: "dfu-util", artifactPath: "firmware.bin", device: "0483:df11" });
+    expect(plan.schema).toBe("ai-factory.firmware-flash-plan/v1"); expect(plan.command).toEqual(["dfu-util", "-d", "0483:df11", "-D", "firmware.bin"]); expect(plan.requiresExplicitExecution).toBe(true);
+    expect(() => planFirmwareFlash({ tool: "dfu-util", artifactPath: "firmware.bin", device: "0483:df11", execute: true })).toThrow("authorized hardware execution adapter");
   });
   it("is deterministic", () => {
     const target = { name: "test-board", architecture: "portable-cpp", board: "generic" } as const;
