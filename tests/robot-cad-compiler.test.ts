@@ -9,8 +9,8 @@ describe("robot CAD compiler", () => {
     requirements: [{ id: "R1", description: "Carry inspection payload", category: "functional", priority: "must" }],
     parts: [{ id: "body", name: "Custom chassis", material: "aluminium", manufacturingProcess: "CNC machining", geometry: { schema: "ai-factory.robot-geometry/v1", units: "mm", operations: [
       { id: "sk", op: "sketch", inputs: [], parameters: { plane: "XY" } },
-      { id: "profile", op: "rectangle", inputs: ["sk"], parameters: { widthMm: 120, heightMm: 80 } },
-      { id: "solid", op: "extrude", inputs: ["sk"], parameters: { distanceMm: 4 } },
+      { id: "profile", op: "rectangle", inputs: ["sk"], parameters: { widthMm: 120, heightMm: 80, centered: true } },
+      { id: "solid", op: "extrude", inputs: ["profile"], parameters: { distanceMm: 4 } },
     ], outputOperationId: "solid" } }],
     joints: [], designRationale: [], unresolvedQuestions: [],
   };
@@ -21,7 +21,30 @@ describe("robot CAD compiler", () => {
     expect(result.designHash).toMatch(/^[a-f0-9]{64}$/);
     expect(result.script).toContain("Custom chassis");
     expect(result.script).toContain("extrudeFeatures.createInput");
+    expect(result.script).toContain("addTwoPointRectangle");
     expect(result.script).not.toContain("executeCreateBox");
+  });
+
+  it("accepts common model-generated dimension aliases and scalar circle centers", () => {
+    const result = compileRobotDesignToFusionScript({ ...design, parts: [{ ...design.parts[0], geometry: { ...design.parts[0].geometry, operations: [
+      { id: "sk", op: "sketch", inputs: [], parameters: {} },
+      { id: "profile", op: "circle", inputs: ["sk"], parameters: { center: "150,0", radius: 15 } },
+      { id: "solid", op: "extrude", inputs: ["profile"], parameters: { distanceMm: 4 } },
+    ], outputOperationId: "solid" } }] });
+    expect(result.unsupportedOperations).toEqual([]);
+    expect(result.script).toContain("Point3D.create(15,0,0), 1.5");
+  });
+
+  it("compiles a model-authored transform for a second crossing frame arm", () => {
+    const result = compileRobotDesignToFusionScript({ ...design, parts: [{ ...design.parts[0], geometry: { ...design.parts[0].geometry, operations: [
+      { id: "sk", op: "sketch", inputs: [], parameters: {} },
+      { id: "profile", op: "rectangle", inputs: ["sk"], parameters: { widthMm: 300, heightMm: 20, centered: true } },
+      { id: "solid", op: "extrude", inputs: ["profile"], parameters: { distanceMm: 2 } },
+      { id: "rotated", op: "transform", inputs: ["solid"], parameters: { rotationDeg: 90, translateXmm: 0, translateYmm: 0 } },
+    ], outputOperationId: "rotated" } }] });
+    expect(result.unsupportedOperations).toEqual([]);
+    expect(result.script).toContain("body.transformBy(matrix)");
+    expect(result.script).toContain("rotationDeg");
   });
 
   it("refuses unsupported operations instead of silently substituting geometry", () => {
