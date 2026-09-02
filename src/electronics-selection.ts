@@ -18,6 +18,20 @@ export const ElectronicsComponentCandidate = z.object({
 });
 export type ElectronicsComponentCandidate = z.infer<typeof ElectronicsComponentCandidate>;
 
+export const ElectronicsRuleFinding = z.object({
+  rule: z.string().min(1),
+  severity: z.enum(["error", "warning", "info"]),
+  message: z.string().min(1),
+});
+export type ElectronicsRuleFinding = z.infer<typeof ElectronicsRuleFinding>;
+
+export const ElectronicsRuleCheck = z.object({
+  schema: z.literal("ai-factory.electronics-erc/v1"),
+  status: z.enum(["pass", "fail"]),
+  findings: z.array(ElectronicsRuleFinding),
+});
+export type ElectronicsRuleCheck = z.infer<typeof ElectronicsRuleCheck>;
+
 export const ElectronicsComponentSelection = z.object({
   schema: z.literal("ai-factory.electronics-component-selection/v1"),
   architectureSchema: z.literal("ai-factory.electronics-architecture/v1"),
@@ -25,6 +39,7 @@ export const ElectronicsComponentSelection = z.object({
   selected: z.array(ElectronicsComponentCandidate),
   rejectedCount: z.number().int().nonnegative(),
   blockingFindings: z.array(z.string()),
+  ruleCheck: ElectronicsRuleCheck,
 });
 export type ElectronicsComponentSelection = z.infer<typeof ElectronicsComponentSelection>;
 
@@ -73,6 +88,56 @@ function blockKeywords(type: string): string[] {
 function hasCategoryMatch(component: StoredComponent, blockType: string): boolean {
   const text = `${component.category} ${component.name} ${component.part_number}`.toLowerCase();
   return blockKeywords(blockType).some(keyword => text.includes(keyword));
+}
+
+function protocolMatches(candidate: ElectronicsComponentCandidate, protocol: string): boolean {
+  const normalizedProtocol = protocol.toLowerCase().replace(/[^a-z0-9]/g, "");
+  const text = `${candidate.category} ${candidate.name} ${candidate.partNumber}`.toLowerCase().replace(/[^a-z0-9]/g, "");
+  return normalizedProtocol.length > 0 && text.includes(normalizedProtocol);
+}
+
+export function runElectronicsRuleCheck(architectureInput: unknown, selectedInput: unknown): ElectronicsRuleCheck {
+  const architecture = ElectronicsArchitecture.parse(architectureInput);
+  const selected = z.array(ElectronicsComponentCandidate).parse(selectedInput);
+  const findings: ElectronicsRuleFinding[] = [];
+
+  const ids = new Set<string>();
+  const partNumbers = new Set<string>();
+  for (const candidate of selected) {
+    if (ids.has(candidate.componentId)) findings.push({ rule: "unique-component-id", severity: "error", message: `Component ${candidate.componentId} is selected more than once.` });
+    ids.add(candidate.componentId);
+    if (partNumbers.has(candidate.partNumber)) findings.push({ rule: "unique-part-number", severity: "error", message: `Part number ${candidate.partNumber} is selected more than once.` });
+    partNumbers.add(candidate.partNumber);
+    if (candidate.lifecycle !== "active") findings.push({ rule: "selected-active", severity: "error", message: `${candidate.partNumber} is not active and cannot be part of a verified selection.` });
+    for (const ruleFinding of candidate.ruleFindings) {
+      if (ruleFinding.severity !== "info") findings.push({ rule: `candidate-${ruleFinding.rule}`, severity: ruleFinding.severity, message: `${candidate.partNumber}: ${ruleFinding.message}` });
+    }
+  }
+
+  if (selected.length === 0) {
+    findings.push({ rule: "selection-nonempty", severity: "error", message: "No electrically valid component has been selected." });
+  }
+
+  for (const block of architecture.functionalBlocks) {
+    const covered = selected.some(candidate => candidate.matchedBlockTypes.includes(block.type));
+    if (!covered) findings.push({ rule: "functional-block-covered", severity: "error", message: `Functional block ${block.name} (${block.type}) has no selected component providing a declared functional fit.` });
+  }
+
+  for (const iface of architecture.interfaces) {
+    const covered = selected.some(candidate => protocolMatches(candidate, iface.protocol));
+    if (!covered) findings.push({ rule: "interface-covered", severity: "error", message: `Interface ${iface.name} (${iface.protocol}) has no selected component whose catalog identity declares that protocol.` });
+  }
+
+  const errors = findings.filter(finding => finding.severity === "error");
+  const warnings = findings.filter(finding => finding.severity === "warning");
+  if (warnings.length > 0 && errors.length === 0) {
+    findings.push({ rule: "erc-warning", severity: "warning", message: `${warnings.length} electrical rule warning(s) require engineering review.` });
+  }
+  return ElectronicsRuleCheck.parse({
+    schema: "ai-factory.electronics-erc/v1",
+    status: errors.length === 0 && warnings.length === 0 ? "pass" : "fail",
+    findings,
+  });
 }
 
 export function selectElectronicsComponents(architectureInput: unknown, componentsInput: unknown, resultLimit = 20): ElectronicsComponentSelection {
@@ -133,6 +198,7 @@ export function selectElectronicsComponents(architectureInput: unknown, componen
     .filter(candidate => candidate.lifecycle === "active" && candidate.ruleFindings.some(finding => finding.severity === "error" || finding.severity === "warning"))
     .slice(0, 10)
     .map(candidate => `${candidate.partNumber}: ${candidate.ruleFindings.filter(finding => finding.severity !== "info").map(finding => finding.message).join(" ")}`);
+  const ruleCheck = runElectronicsRuleCheck(architecture, selected);
 
   return ElectronicsComponentSelection.parse({
     schema: "ai-factory.electronics-component-selection/v1",
@@ -141,5 +207,6 @@ export function selectElectronicsComponents(architectureInput: unknown, componen
     selected,
     rejectedCount: Math.max(0, ranked.length - selected.length),
     blockingFindings,
+    ruleCheck,
   });
 }
