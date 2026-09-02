@@ -33,7 +33,7 @@ export function registerRobotDesignRoutes(app: FastifyInstance): void {
           success: compiled.unsupportedOperations.length === 0,
           unsupportedOperations: compiled.unsupportedOperations,
         });
-        return reply.send({ ...compiled, artifactId: compileArtifactId, designArtifactId, compileHash });
+        return reply.send({ ...compiled, schema: design.schema, artifactId: compileArtifactId, designArtifactId, compileHash });
       }
 
       const result = await compileRobotDesignToFusion(design);
@@ -42,7 +42,7 @@ export function registerRobotDesignRoutes(app: FastifyInstance): void {
         ...result,
         designArtifactId,
       });
-      return reply.send({ ...result, artifactId: compileArtifactId, designArtifactId, compileHash });
+      return reply.send({ ...result, schema: design.schema, artifactId: compileArtifactId, designArtifactId, compileHash });
     } catch (error) {
       return reply.code(400).send({ error: error instanceof Error ? error.message : String(error) });
     }
