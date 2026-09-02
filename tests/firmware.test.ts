@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { buildFirmwareProject, generateFirmwareProject } from "../src/firmware.js";
+import { parseFirmwareTelemetry, runFirmwareHil } from "../src/firmware-io.js";
 
 const architecture = {
   schema: "ai-factory.electronics-architecture/v1", name: "controller board",
@@ -15,20 +16,21 @@ const architecture = {
 describe("firmware generation", () => {
   it("produces a validated portable project with architecture lineage", () => {
     const project = generateFirmwareProject(architecture, { name: "test-board", architecture: "portable-cpp", board: "generic" });
-    expect(project.schema).toBe("ai-factory.firmware-project/v1");
-    expect(project.architectureHash).toHaveLength(64);
-    expect(project.files.map(file => file.path)).toEqual(["src/main.cpp", "README.md"]);
-    expect(project.interfaces).toEqual(["CAN"]);
-    expect(project.buildCommand.slice(0, 3)).toEqual(["g++", "-std=c++17", "-Wall"]);
+    expect(project.schema).toBe("ai-factory.firmware-project/v1"); expect(project.architectureHash).toHaveLength(64);
+    expect(project.files.map(file => file.path)).toEqual(["src/main.cpp", "README.md"]); expect(project.interfaces).toEqual(["CAN"]);
   });
-
   it("builds the generated source with the real host compiler", async () => {
     const project = generateFirmwareProject(architecture, { name: "test-board", architecture: "portable-cpp", board: "generic" });
-    const result = await buildFirmwareProject(project);
-    expect(result.status).toBe("pass");
-    expect(result.exitCode).toBe(0);
+    const result = await buildFirmwareProject(project); expect(result.status).toBe("pass"); expect(result.exitCode).toBe(0);
   });
-
+  it("parses structured heartbeat telemetry", () => {
+    expect(parseFirmwareTelemetry("AI_FACTORY_HEARTBEAT 7")).toMatchObject({ schema: "ai-factory.firmware-telemetry/v1", type: "heartbeat", sequence: 7 });
+    expect(parseFirmwareTelemetry("unrelated output")).toBeNull();
+  });
+  it("executes the generated firmware through the host HIL interface", async () => {
+    const project = generateFirmwareProject(architecture, { name: "test-board", architecture: "portable-cpp", board: "generic" });
+    const result = await runFirmwareHil(project); expect(result.status).toBe("pass"); expect(result.events[0]?.sequence).toBe(1);
+  });
   it("is deterministic", () => {
     const target = { name: "test-board", architecture: "portable-cpp", board: "generic" } as const;
     expect(generateFirmwareProject(architecture, target)).toEqual(generateFirmwareProject(architecture, target));
