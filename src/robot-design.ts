@@ -42,8 +42,57 @@ function assertAcyclic(operations: RobotGeometryOperation[], partId: string): vo
   for (const operation of operations) visit(operation.id);
 }
 
+function normalizeScalarParameters(parameters: Record<string, unknown>): Record<string, unknown> {
+  const normalized = { ...parameters };
+  if (normalized.widthMm === undefined && typeof normalized.width === "number") normalized.widthMm = normalized.width;
+  if (normalized.heightMm === undefined && typeof normalized.height === "number") normalized.heightMm = normalized.height;
+  if (normalized.radiusMm === undefined && typeof normalized.radius === "number") normalized.radiusMm = normalized.radius;
+  if (normalized.centerX === undefined && normalized.centerY === undefined && typeof normalized.center === "string") {
+    const [x, y] = normalized.center.split(",").map(value => Number(value.trim()));
+    if (Number.isFinite(x) && Number.isFinite(y)) { normalized.centerX = x; normalized.centerY = y; }
+  }
+  if (normalized.centerX === undefined && normalized.centerY === undefined && typeof normalized.center === "number") {
+    normalized.centerX = normalized.center; normalized.centerY = 0;
+  }
+  return normalized;
+}
+
+function normalizeRobotDesignInput(input: unknown): unknown {
+  if (!input || typeof input !== "object" || Array.isArray(input)) return input;
+  const source = input as Record<string, unknown>;
+  const parts = Array.isArray(source.parts) ? source.parts.map(rawPart => {
+    if (!rawPart || typeof rawPart !== "object" || Array.isArray(rawPart)) return rawPart;
+    const part = rawPart as Record<string, unknown>;
+    const geometry = part.geometry;
+    if (!geometry || typeof geometry !== "object" || Array.isArray(geometry)) return part;
+    const g = geometry as Record<string, unknown>;
+    const operations = Array.isArray(g.operations) ? g.operations.map(rawOp => {
+      if (!rawOp || typeof rawOp !== "object" || Array.isArray(rawOp)) return rawOp;
+      const op = rawOp as Record<string, unknown>;
+      return { ...op, parameters: normalizeScalarParameters((op.parameters && typeof op.parameters === "object" && !Array.isArray(op.parameters)) ? op.parameters as Record<string, unknown> : {}) };
+    }) : g.operations;
+    return { ...part, geometry: { ...g, operations } };
+  }) : source.parts;
+  const joints = Array.isArray(source.joints) ? source.joints.map((rawJoint, index) => {
+    if (!rawJoint || typeof rawJoint !== "object" || Array.isArray(rawJoint)) return rawJoint;
+    const joint = rawJoint as Record<string, unknown>;
+    const partIds = Array.isArray(joint.partIds) ? joint.partIds.filter(value => typeof value === "string") : [];
+    const parentPartId = joint.parentPartId ?? partIds[0];
+    const childPartId = joint.childPartId ?? partIds[1];
+    const id = typeof joint.id === "string" ? joint.id : `JOINT-${String(index + 1).padStart(3, "0")}`;
+    const type = joint.type === "bolted" ? "fixed" : joint.type;
+    return { ...joint, id, parentPartId, childPartId, type };
+  }) : source.joints;
+  const designRationale = Array.isArray(source.designRationale) ? source.designRationale.map(item => {
+    if (typeof item === "string") return item;
+    if (item && typeof item === "object" && !Array.isArray(item) && typeof (item as Record<string, unknown>).description === "string") return String((item as Record<string, unknown>).description);
+    return String(item);
+  }) : source.designRationale;
+  return { ...source, parts, joints, designRationale };
+}
+
 export function validateRobotDesign(input: unknown): RobotDesign {
-  const design = RobotDesign.parse(input);
+  const design = RobotDesign.parse(normalizeRobotDesignInput(input));
   assertUnique(design.requirements.map(r => r.id), "Requirement"); assertUnique(design.parts.map(p => p.id), "Part"); assertUnique(design.joints.map(j => j.id), "Joint");
   const partIds = new Set(design.parts.map(p => p.id));
   for (const joint of design.joints) { if (!partIds.has(joint.parentPartId) || !partIds.has(joint.childPartId)) throw new Error(`Joint ${joint.id} references an unknown part.`); if (joint.parentPartId === joint.childPartId) throw new Error(`Joint ${joint.id} cannot connect a part to itself.`); }
