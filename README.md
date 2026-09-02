@@ -19,7 +19,7 @@ See **[GOAL.md](./GOAL.md)** for the complete end-state specification and design
 ### Phase 3 — Electronics and embedded systems **[current]**
 - [x] Requirements-driven electronics architecture — deterministic architecture synthesis from project electrical requirements, requirement traceability, power-domain extraction, functional blocks, interface identification, explicit open questions, capability discovery, API execution, hash-identified artifact persistence, and unit/API regression coverage.
 - [x] Schematic and PCB design tool integration — real KiCad CLI integration for project-scoped schematic ERC, PCB DRC, optional netlist export, structured validation reports, path isolation, persisted validation artifacts, and KiCad 9 CI integration tests.
-- [ ] Component selection and electrical rule checking.
+- [x] Component selection and electrical rule checking — deterministic component ranking and selection against the requirements-driven architecture, lifecycle enforcement, voltage/current compatibility, functional and interface coverage, uniqueness checks, explicit ERC pass/fail findings, persisted hash-verified selection artifacts, capability discovery, API execution, and unit/API regression coverage.
 - [ ] Power, thermal, signal-integrity, and interface analysis.
 - [ ] Firmware generation, build, flashing, logging, and hardware-in-the-loop interfaces.
 - [ ] Electronics BOM, substitutions, lifecycle and procurement integration.
@@ -70,4 +70,4 @@ See **[GOAL.md](./GOAL.md)** for the complete end-state specification and design
 
 ### Development rule
 
-`main` / `origin/main` is the sole development branch. On `continue`, start at the first incomplete item in the active phase. Finish the item end-to-end—including implementation, tests, documentation, migrations, diagnostics, and CI—before marking it complete or advancing. Never treat a stub, mock-only path, or unverified integration as completion.
+`main` / `origin/main` is the sole development branch. On `continue`, start at the first incomplete item in the active phase. Finish the item end-to-end—including implementation, tests, documentation, migrations, diagnostics, and CI—before moving forward. Never treat a stub, mock-only path, or unverified integration as completion.
