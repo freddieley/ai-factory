@@ -15,6 +15,33 @@ export type RobotCadCompileResult = {
 
 function py(value: unknown): string { return JSON.stringify(value); }
 function point(x: number, y: number): string { return `adsk.core.Point3D.create(${x},${y},0)`; }
+function num(value: unknown, fallback = 0): number { const n = Number(value); return Number.isFinite(n) ? n : fallback; }
+
+function rectangleLines(sketchRef: string, parameters: Record<string, unknown>): string[] | null {
+  const w = num(parameters.widthMm) / 10;
+  const h = num(parameters.heightMm) / 10;
+  const cx = num(parameters.centerX) / 10;
+  const cy = num(parameters.centerY) / 10;
+  const rotationDeg = num(parameters.rotationDeg);
+  if (!(w > 0 && h > 0) || !Number.isFinite(cx) || !Number.isFinite(cy) || !Number.isFinite(rotationDeg)) return null;
+  const angle = rotationDeg * Math.PI / 180;
+  const local = [[-w / 2, -h / 2], [w / 2, -h / 2], [w / 2, h / 2], [-w / 2, h / 2]];
+  const corners = local.map(([x, y]) => [cx + x * Math.cos(angle) - y * Math.sin(angle), cy + x * Math.sin(angle) + y * Math.cos(angle)]);
+  const lines: string[] = [];
+  for (let i = 0; i < corners.length; i++) {
+    const a = corners[i]; const b = corners[(i + 1) % corners.length];
+    lines.push(`${sketchRef}.sketchCurves.sketchLines.addByTwoPoints(${point(a[0], a[1])}, ${point(b[0], b[1])})`);
+  }
+  return lines;
+}
+
+function circleLine(sketchRef: string, parameters: Record<string, unknown>): string | null {
+  const r = num(parameters.radiusMm) / 10;
+  const x = num(parameters.centerX) / 10;
+  const y = num(parameters.centerY) / 10;
+  if (!(r > 0) || !Number.isFinite(x) || !Number.isFinite(y)) return null;
+  return `${sketchRef}.sketchCurves.sketchCircles.addByCenterRadius(${point(x, y)}, ${r})`;
+}
 
 function compilePart(part: RobotDesign["parts"][number]): { script: string; unsupported: string[] } {
   const unsupported: string[] = [];
@@ -35,39 +62,55 @@ function compilePart(part: RobotDesign["parts"][number]): { script: string; unsu
         const plane = String(op.parameters.plane ?? "XY").toUpperCase();
         const planeExpr = plane === "YZ" ? "component.yZConstructionPlane" : plane === "XZ" ? "component.xZConstructionPlane" : "component.xYConstructionPlane";
         lines.push(`${ref} = sketches.add(${planeExpr})`);
+        const nested = Array.isArray(op.parameters.operations) ? op.parameters.operations : [];
+        for (const nestedOperation of nested) {
+          if (!nestedOperation || typeof nestedOperation !== "object" || Array.isArray(nestedOperation)) {
+            unsupported.push(`${part.id}:${op.id}:sketch-nested-operation-shape`);
+            continue;
+          }
+          const nestedRecord = nestedOperation as Record<string, unknown>;
+          const nestedType = String(nestedRecord.op ?? "");
+          const nestedParams = nestedRecord.parameters && typeof nestedRecord.parameters === "object" && !Array.isArray(nestedRecord.parameters)
+            ? nestedRecord.parameters as Record<string, unknown>
+            : {};
+          if (nestedType === "rectangle") {
+            const rectangle = rectangleLines(ref, nestedParams);
+            if (rectangle) lines.push(...rectangle);
+            else unsupported.push(`${part.id}:${op.id}:nested-rectangle-dimensions`);
+          } else if (nestedType === "circle") {
+            const circle = circleLine(ref, nestedParams);
+            if (circle) lines.push(circle);
+            else unsupported.push(`${part.id}:${op.id}:nested-circle-dimensions`);
+          } else if (nestedType) {
+            unsupported.push(`${part.id}:${op.id}:nested-${nestedType}`);
+          }
+        }
         break;
       }
       case "rectangle": {
         const sketch = op.inputs.length ? `refs[${py(op.inputs[0])}]` : "None";
-        const w = Number(op.parameters.widthMm ?? 0) / 10;
-        const h = Number(op.parameters.heightMm ?? 0) / 10;
-        const cx = Number(op.parameters.centerX ?? 0) / 10;
-        const cy = Number(op.parameters.centerY ?? 0) / 10;
-        const rotationDeg = Number(op.parameters.rotationDeg ?? 0);
-        if (sketch === "None" || !(w > 0 && h > 0) || !Number.isFinite(cx) || !Number.isFinite(cy) || !Number.isFinite(rotationDeg)) { unsupported.push(`${part.id}:${op.id}:rectangle-dimensions`); break; }
-        const angle = rotationDeg * Math.PI / 180;
-        const local = [[-w / 2, -h / 2], [w / 2, -h / 2], [w / 2, h / 2], [-w / 2, h / 2]];
-        const corners = local.map(([x, y]) => [cx + x * Math.cos(angle) - y * Math.sin(angle), cy + x * Math.sin(angle) + y * Math.cos(angle)]);
-        for (let i = 0; i < corners.length; i++) {
-          const a = corners[i]; const b = corners[(i + 1) % corners.length];
-          lines.push(`${sketch}.sketchCurves.sketchLines.addByTwoPoints(${point(a[0], a[1])}, ${point(b[0], b[1])})`);
+        const rectangle = rectangleLines(sketch, op.parameters);
+        if (sketch === "None" || !rectangle) {
+          unsupported.push(`${part.id}:${op.id}:rectangle-dimensions`);
+          break;
         }
-        lines.push(`${ref} = ${sketch}`);
+        lines.push(...rectangle, `${ref} = ${sketch}`);
         break;
       }
       case "circle": {
         const sketch = op.inputs.length ? `refs[${py(op.inputs[0])}]` : "None";
-        const r = Number(op.parameters.radiusMm ?? 0) / 10;
-        const x = Number(op.parameters.centerX ?? 0) / 10;
-        const y = Number(op.parameters.centerY ?? 0) / 10;
-        if (sketch === "None" || !(r > 0) || !Number.isFinite(x) || !Number.isFinite(y)) { unsupported.push(`${part.id}:${op.id}:circle-input-or-radius`); break; }
-        lines.push(`${sketch}.sketchCurves.sketchCircles.addByCenterRadius(${point(x, y)}, ${r})`, `${ref} = ${sketch}`);
+        const circle = circleLine(sketch, op.parameters);
+        if (sketch === "None" || !circle) {
+          unsupported.push(`${part.id}:${op.id}:circle-input-or-radius`);
+          break;
+        }
+        lines.push(circle, `${ref} = ${sketch}`);
         break;
       }
       case "extrude": {
         const profileInput = op.inputs.length ? op.inputs[0] : "";
         const sketch = profileInput ? `refs[${py(profileInput)}]` : "None";
-        const distance = Number(op.parameters.distanceMm ?? 0) / 10;
+        const distance = num(op.parameters.distanceMm) / 10;
         if (sketch === "None" || !(distance > 0)) { unsupported.push(`${part.id}:${op.id}:extrude-input-or-distance`); break; }
         lines.push(
           `profile = ${sketch}.profiles.item(0)`,
@@ -91,9 +134,9 @@ function compilePart(part: RobotDesign["parts"][number]): { script: string; unsu
       case "transform": {
         const sourceId = op.inputs.length ? op.inputs[0] : "";
         const source = sourceId ? `refs[${py(sourceId)}]` : "None";
-        const rotationDeg = Number(op.parameters.rotationDeg ?? op.parameters.rotateDeg ?? 0);
-        const tx = Number(op.parameters.translateXmm ?? op.parameters.translateX ?? 0) / 10;
-        const ty = Number(op.parameters.translateYmm ?? op.parameters.translateY ?? 0) / 10;
+        const rotationDeg = num(op.parameters.rotationDeg ?? op.parameters.rotateDeg);
+        const tx = num(op.parameters.translateXmm ?? op.parameters.translateX) / 10;
+        const ty = num(op.parameters.translateYmm ?? op.parameters.translateY) / 10;
         if (source === "None" || !Number.isFinite(rotationDeg) || !Number.isFinite(tx) || !Number.isFinite(ty)) { unsupported.push(`${part.id}:${op.id}:transform-input-or-parameters`); break; }
         lines.push(
           `if ${py(sourceId)} in solidByInput:`,
