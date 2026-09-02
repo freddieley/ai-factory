@@ -1,0 +1,187 @@
+import { z } from "zod";
+import { ElectronicsArchitecture } from "./electronics.js";
+import { ElectronicsComponentSelection } from "./electronics-selection.js";
+
+export const ElectronicsAnalysisFinding = z.object({
+  domain: z.enum(["power", "thermal", "signal-integrity", "interface"]),
+  rule: z.string().min(1),
+  severity: z.enum(["error", "warning", "info"]),
+  message: z.string().min(1),
+});
+export type ElectronicsAnalysisFinding = z.infer<typeof ElectronicsAnalysisFinding>;
+
+export const ElectronicsPowerAnalysis = z.object({
+  rail: z.string().min(1),
+  nominalVoltageV: z.number().positive(),
+  requiredCurrentA: z.number().nonnegative().nullable(),
+  estimatedLoadPowerW: z.number().nonnegative().nullable(),
+  status: z.enum(["verified", "unknown"]),
+});
+
+export const ElectronicsThermalAnalysis = z.object({
+  componentId: z.string().min(1),
+  partNumber: z.string().min(1),
+  estimatedDissipationW: z.number().nonnegative().nullable(),
+  thermalResistanceCPerW: z.number().positive().nullable(),
+  estimatedTemperatureRiseC: z.number().nonnegative().nullable(),
+  maximumOperatingTempC: z.number().nullable(),
+  status: z.enum(["verified", "unknown"]),
+});
+
+export const ElectronicsSignalAnalysis = z.object({
+  componentId: z.string().min(1),
+  partNumber: z.string().min(1),
+  protocol: z.string().min(1),
+  requiredFrequencyMHz: z.number().positive().nullable(),
+  maximumFrequencyMHz: z.number().positive().nullable(),
+  impedanceOhm: z.number().positive().nullable(),
+  terminationRequired: z.boolean().nullable(),
+  terminationPresent: z.boolean().nullable(),
+  status: z.enum(["verified", "unknown"]),
+});
+
+export const ElectronicsInterfaceAnalysis = z.object({
+  protocol: z.string().min(1),
+  componentIds: z.array(z.string().min(1)),
+  requiredVoltageV: z.number().positive().nullable(),
+  componentLogicVoltageV: z.number().positive().nullable(),
+  connectorDeclared: z.boolean(),
+  status: z.enum(["verified", "unknown"]),
+});
+
+export const ElectronicsEngineeringAnalysis = z.object({
+  schema: z.literal("ai-factory.electronics-engineering-analysis/v1"),
+  status: z.enum(["pass", "fail"]),
+  findings: z.array(ElectronicsAnalysisFinding),
+  power: z.array(ElectronicsPowerAnalysis),
+  thermal: z.array(ElectronicsThermalAnalysis),
+  signalIntegrity: z.array(ElectronicsSignalAnalysis),
+  interfaces: z.array(ElectronicsInterfaceAnalysis),
+});
+export type ElectronicsEngineeringAnalysis = z.infer<typeof ElectronicsEngineeringAnalysis>;
+
+type SelectedComponent = z.infer<typeof ElectronicsComponentSelection>["selected"][number];
+type ComponentData = {
+  currentDrawA?: number;
+  powerW?: number;
+  thermalResistanceCPerW?: number;
+  maximumOperatingTempC?: number;
+  maximumAmbientTempC?: number;
+  maxFrequencyMHz?: number;
+  impedanceOhm?: number;
+  terminationRequired?: boolean;
+  terminationPresent?: boolean;
+  logicVoltageV?: number;
+  connector?: string;
+  protocols?: string[];
+};
+
+type RawSelectedComponent = SelectedComponent & { data?: ComponentData };
+
+function dataFor(component: RawSelectedComponent): ComponentData {
+  const data = component.data;
+  return data && typeof data === "object" ? data : {};
+}
+
+function numberFromText(text: string, units: RegExp): number | null {
+  const match = text.match(new RegExp(`[-+]?\\d+(?:\\.\\d+)?\\s*${units.source}`, "i"));
+  return match ? Number(match[0].match(/[-+]?\\d+(?:\\.\\d+)?/)?.[0]) : null;
+}
+
+function requirementNumber(architecture: ElectronicsArchitecture, pattern: RegExp): number | null {
+  for (const requirement of architecture.requirements) {
+    const text = `${requirement.description} ${requirement.value ?? ""} ${requirement.unit ?? ""}`;
+    const match = text.match(pattern);
+    if (match) return Number(match[1]);
+  }
+  return null;
+}
+
+function requiredSignalFrequency(architecture: ElectronicsArchitecture, protocol: string): number | null {
+  for (const requirement of architecture.requirements) {
+    const text = `${requirement.description} ${requirement.value ?? ""} ${requirement.unit ?? ""}`;
+    if (!text.toLowerCase().includes(protocol.toLowerCase())) continue;
+    const frequency = numberFromText(text, /(?:mhz|khz|hz)/);
+    if (frequency === null) continue;
+    const lower = text.toLowerCase();
+    if (lower.includes("khz")) return frequency / 1000;
+    if (lower.includes("hz") && !lower.includes("khz") && !lower.includes("mhz")) return frequency / 1_000_000;
+    return frequency;
+  }
+  return null;
+}
+
+function protocolComponent(component: SelectedComponent, protocol: string): boolean {
+  const normalized = protocol.toLowerCase().replace(/[^a-z0-9]/g, "");
+  const text = `${component.category} ${component.name} ${component.partNumber}`.toLowerCase().replace(/[^a-z0-9]/g, "");
+  const data = (component as RawSelectedComponent).data;
+  const protocols = Array.isArray(data?.protocols) ? data.protocols.map(value => String(value).toLowerCase().replace(/[^a-z0-9]/g, "")) : [];
+  return normalized.length > 0 && (text.includes(normalized) || protocols.includes(normalized));
+}
+
+export function analyzeElectronicsEngineering(architectureInput: unknown, selectionInput: unknown): ElectronicsEngineeringAnalysis {
+  const architecture = ElectronicsArchitecture.parse(architectureInput);
+  const selection = ElectronicsComponentSelection.parse(selectionInput);
+  const selected = selection.selected as RawSelectedComponent[];
+  const findings: ElectronicsAnalysisFinding[] = [];
+
+  if (selection.ruleCheck.status !== "pass") {
+    findings.push({ domain: "interface", rule: "selection-valid", severity: "error", message: "Engineering analysis requires a passing component selection/ERC result." });
+  }
+
+  const ambientMaxC = requirementNumber(architecture, /(?:ambient|max(?:imum)? ambient|operating ambient)[^\d]*([-+]?\d+(?:\.\d+)?)/i);
+  const power = architecture.powerDomains.map(domain => {
+    const railComponents = selected.filter(component => {
+      const data = dataFor(component);
+      return data.currentDrawA !== undefined || data.powerW !== undefined || (component as RawSelectedComponent).matchedBlockTypes.includes("power");
+    });
+    const currentKnown = railComponents.length > 0 && railComponents.every(component => dataFor(component).currentDrawA !== undefined);
+    const requiredCurrentA = currentKnown ? railComponents.reduce((sum, component) => sum + (dataFor(component).currentDrawA ?? 0), 0) : null;
+    const powerKnown = railComponents.length > 0 && railComponents.every(component => dataFor(component).powerW !== undefined);
+    const estimatedLoadPowerW = powerKnown ? railComponents.reduce((sum, component) => sum + (dataFor(component).powerW ?? 0), 0) : null;
+    if (!architecture.systemMaxCurrentA) findings.push({ domain: "power", rule: "system-current-known", severity: "warning", message: "No explicit system maximum current requirement is available; power capacity cannot be fully verified." });
+    if (!currentKnown) findings.push({ domain: "power", rule: "load-current-known", severity: "warning", message: `${domain.name} does not have complete selected-component current-draw data.` });
+    if (requiredCurrentA !== null && architecture.systemMaxCurrentA !== undefined && requiredCurrentA > architecture.systemMaxCurrentA) findings.push({ domain: "power", rule: "system-current-budget", severity: "error", message: `${domain.name} estimated load current ${requiredCurrentA} A exceeds the ${architecture.systemMaxCurrentA} A system requirement.` });
+    return { rail: domain.name, nominalVoltageV: domain.nominalVoltageV, requiredCurrentA, estimatedLoadPowerW, status: currentKnown && architecture.systemMaxCurrentA !== undefined ? "verified" as const : "unknown" as const };
+  });
+
+  const thermal = selected.map(component => {
+    const data = dataFor(component);
+    const dissipation = data.powerW ?? (data.currentDrawA !== undefined ? data.currentDrawA * (component as RawSelectedComponent).score * 0 : undefined);
+    const rise = dissipation !== undefined && data.thermalResistanceCPerW !== undefined ? dissipation * data.thermalResistanceCPerW : null;
+    const maximumOperatingTempC = data.maximumOperatingTempC ?? ambientMaxC;
+    if (dissipation === undefined) findings.push({ domain: "thermal", rule: "dissipation-known", severity: "warning", message: `${component.partNumber} has no verified power-dissipation value.` });
+    if (data.thermalResistanceCPerW === undefined) findings.push({ domain: "thermal", rule: "thermal-resistance-known", severity: "warning", message: `${component.partNumber} has no verified thermal-resistance value.` });
+    if (ambientMaxC !== null && maximumOperatingTempC !== null && rise !== null && ambientMaxC + rise > maximumOperatingTempC) findings.push({ domain: "thermal", rule: "temperature-limit", severity: "error", message: `${component.partNumber} estimated temperature ${ambientMaxC + rise} °C exceeds its ${maximumOperatingTempC} °C limit.` });
+    return { componentId: component.componentId, partNumber: component.partNumber, estimatedDissipationW: dissipation ?? null, thermalResistanceCPerW: data.thermalResistanceCPerW ?? null, estimatedTemperatureRiseC: rise, maximumOperatingTempC: maximumOperatingTempC ?? null, status: dissipation !== undefined && data.thermalResistanceCPerW !== undefined ? "verified" as const : "unknown" as const };
+  });
+
+  const signalIntegrity = architecture.interfaces.map(iface => {
+    const component = selected.find(candidate => protocolComponent(candidate, iface.protocol));
+    const data = component ? dataFor(component) : {};
+    const requiredFrequencyMHz = requiredSignalFrequency(architecture, iface.protocol);
+    const maximumFrequencyMHz = data.maxFrequencyMHz ?? null;
+    const impedanceOhm = data.impedanceOhm ?? null;
+    const terminationRequired = data.terminationRequired ?? null;
+    const terminationPresent = data.terminationPresent ?? null;
+    if (!component) findings.push({ domain: "signal-integrity", rule: "protocol-component", severity: "error", message: `No selected component declares ${iface.protocol}.` });
+    if (requiredFrequencyMHz !== null && (maximumFrequencyMHz === null || maximumFrequencyMHz < requiredFrequencyMHz)) findings.push({ domain: "signal-integrity", rule: "frequency-capability", severity: maximumFrequencyMHz === null ? "warning" : "error", message: maximumFrequencyMHz === null ? `${iface.protocol} maximum supported frequency is unknown.` : `${iface.protocol} requires ${requiredFrequencyMHz} MHz but selected component is rated for ${maximumFrequencyMHz} MHz.` });
+    if (impedanceOhm === null) findings.push({ domain: "signal-integrity", rule: "impedance-known", severity: "warning", message: `${iface.protocol} characteristic impedance is not declared.` });
+    if (terminationRequired === true && terminationPresent !== true) findings.push({ domain: "signal-integrity", rule: "termination", severity: "error", message: `${iface.protocol} requires termination but no termination is declared.` });
+    return { componentId: component?.componentId ?? "unresolved", partNumber: component?.partNumber ?? "unresolved", protocol: iface.protocol, requiredFrequencyMHz, maximumFrequencyMHz, impedanceOhm, terminationRequired, terminationPresent, status: component && (requiredFrequencyMHz === null || maximumFrequencyMHz !== null && maximumFrequencyMHz >= requiredFrequencyMHz) && impedanceOhm !== null && (terminationRequired !== true || terminationPresent === true) ? "verified" as const : "unknown" as const };
+  });
+
+  const interfaces = architecture.interfaces.map(iface => {
+    const matches = selected.filter(candidate => protocolComponent(candidate, iface.protocol));
+    const componentLogicVoltageV = matches.map(component => dataFor(component).logicVoltageV).find(value => value !== undefined) ?? null;
+    const requiredVoltageV = requirementNumber(architecture, new RegExp(`${iface.protocol.replace(/[^a-z0-9]/gi, "\\s*")}[^\\d]*([-+]?\\d+(?:\\.\\d+)?)\\s*V`, "i"));
+    const connectorDeclared = matches.some(component => Boolean(dataFor(component).connector));
+    if (requiredVoltageV !== null && componentLogicVoltageV !== null && Math.abs(requiredVoltageV - componentLogicVoltageV) > 0.25) findings.push({ domain: "interface", rule: "logic-voltage", severity: "error", message: `${iface.protocol} requires ${requiredVoltageV} V but selected component logic is ${componentLogicVoltageV} V.` });
+    if (!connectorDeclared) findings.push({ domain: "interface", rule: "connector-declared", severity: "warning", message: `${iface.protocol} has no selected connector/interface declaration.` });
+    return { protocol: iface.protocol, componentIds: matches.map(component => component.componentId), requiredVoltageV, componentLogicVoltageV, connectorDeclared, status: matches.length > 0 && (requiredVoltageV === null || componentLogicVoltageV === null || Math.abs(requiredVoltageV - componentLogicVoltageV) <= 0.25) && connectorDeclared ? "verified" as const : "unknown" as const };
+  });
+
+  const errors = findings.filter(finding => finding.severity === "error");
+  const warnings = findings.filter(finding => finding.severity === "warning");
+  return ElectronicsEngineeringAnalysis.parse({ schema: "ai-factory.electronics-engineering-analysis/v1", status: errors.length === 0 && warnings.length === 0 ? "pass" : "fail", findings, power, thermal, signalIntegrity, interfaces });
+}
