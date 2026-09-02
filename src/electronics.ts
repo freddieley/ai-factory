@@ -54,6 +54,13 @@ function normalizedText(requirement: ElectronicsRequirement): string {
   return `${requirement.description} ${requirement.value ?? ""} ${requirement.unit ?? ""}`.toLowerCase();
 }
 
+function numericRequirementWithUnit(requirement: ElectronicsRequirement, unit: string): number | null {
+  const normalizedUnit = unit.toLowerCase();
+  const text = normalizedText(requirement);
+  const match = text.match(new RegExp(`([-+]?\\d+(?:\\.\\d+)?)\\s*${normalizedUnit}\\b`, "i"));
+  return match ? Number(match[1]) : null;
+}
+
 function inferBlockType(requirement: ElectronicsRequirement): z.infer<typeof FunctionalBlockType> {
   const text = normalizedText(requirement);
   if (/(mcu|microcontroller|controller|processor|cpu|compute)/.test(text)) return "controller";
@@ -110,7 +117,8 @@ export function buildRequirementsDrivenElectronicsArchitecture(input: unknown, n
     if (unit === "V" && value !== null && value > 0) {
       powerByVoltage.set(value, [...(powerByVoltage.get(value) ?? []), requirement.id]);
     }
-    if (unit === "A" && value !== null && value > 0) systemMaxCurrentA = Math.max(systemMaxCurrentA ?? 0, value);
+    const currentValue = unit === "A" && value !== null ? value : numericRequirementWithUnit(requirement, "a");
+    if (currentValue !== null && currentValue > 0) systemMaxCurrentA = Math.max(systemMaxCurrentA ?? 0, currentValue);
 
     const protocol = protocolFromRequirement(requirement);
     if (protocol) interfacesByProtocol.set(protocol, [...(interfacesByProtocol.get(protocol) ?? []), requirement.id]);
