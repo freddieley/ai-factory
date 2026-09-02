@@ -17,7 +17,7 @@ describe("drone reference platform", () => {
     expect(architecture.functionalBlocks.some(block => block.type === "controller")).toBe(true);
     expect(architecture.functionalBlocks.some(block => block.type === "sensor")).toBe(true);
     expect(architecture.functionalBlocks.some(block => block.type === "actuator")).toBe(true);
-    expect(architecture.interfaces.map(iface => iface.protocol)).toEqual(["I²C", "SPI", "UART"]);
+    expect(architecture.interfaces.map(iface => iface.protocol)).toEqual(["I²C", "SPI", "UART", "USB"]);
   });
 
   it("is deterministic", () => {
