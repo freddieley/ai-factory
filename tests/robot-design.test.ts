@@ -39,6 +39,23 @@ describe("model-authored robot design IR", () => {
     expect(result.parts[0].geometry.operations.map(operation => operation.op)).toEqual(["sketch", "extrude", "pattern", "fillet"]);
   });
 
+  it("normalizes common model-generated parameter and joint aliases without changing geometry intent", () => {
+    const result = validateRobotDesign({
+      ...design,
+      parts: [{ ...design.parts[0], geometry: { ...design.parts[0].geometry, operations: [
+        { id: "sk", op: "sketch", inputs: [], parameters: {} },
+        { id: "profile", op: "rectangle", inputs: ["sk"], parameters: { width: 300, height: 20 } },
+        { id: "solid", op: "extrude", inputs: ["profile"], parameters: { distanceMm: 2 } },
+      ], outputOperationId: "solid" } }],
+      joints: [{ id: "j1", partIds: ["chassis", "chassis-2"], type: "bolted" }],
+      designRationale: [{ description: "Generated from the requested mechanical objective." }],
+    });
+    expect(result.parts[0].geometry.operations[1].parameters.widthMm).toBe(300);
+    expect(result.parts[0].geometry.operations[1].parameters.heightMm).toBe(20);
+    expect(result.joints[0].type).toBe("fixed");
+    expect(result.designRationale[0]).toBe("Generated from the requested mechanical objective.");
+  });
+
   it("rejects dangling geometry references and self-joints", () => {
     expect(() => validateRobotDesign({ ...design, parts: [{ ...design.parts[0], geometry: { ...design.parts[0].geometry, outputOperationId: "missing" } }] })).toThrow("outputOperationId");
     expect(() => validateRobotDesign({ ...design, joints: [{ id: "j", parentPartId: "chassis", childPartId: "chassis", type: "fixed", parameters: {} }] })).toThrow("cannot connect a part to itself");
