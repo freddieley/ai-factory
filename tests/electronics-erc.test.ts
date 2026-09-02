@@ -35,7 +35,7 @@ describe("electronics electrical rule checking", () => {
   });
 
   it("fails when a functional block or interface is uncovered", () => {
-    const result = runElectronicsRuleCheck(architecture, [candidate({ matchedBlockTypes: ["controller"], name: "microcontroller" })]);
+    const result = runElectronicsRuleCheck(architecture, [candidate({ matchedBlockTypes: ["controller"], partNumber: "MCU-BARE", name: "microcontroller", category: "microcontroller" })]);
     expect(result.status).toBe("fail");
     expect(result.findings.some(finding => finding.rule === "functional-block-covered" && finding.message.includes("communications"))).toBe(true);
     expect(result.findings.some(finding => finding.rule === "interface-covered" && finding.message.includes("CAN"))).toBe(true);
