@@ -47,7 +47,7 @@ describe("model-authored robot design IR", () => {
         { id: "profile", op: "rectangle", inputs: ["sk"], parameters: { width: 300, height: 20 } },
         { id: "solid", op: "extrude", inputs: ["profile"], parameters: { distanceMm: 2 } },
       ], outputOperationId: "solid" } }],
-      joints: [{ id: "j1", partIds: ["chassis", "chassis-2"], type: "bolted" }],
+      joints: [{ id: "j1", parentPartId: "chassis", childPartId: "chassis", type: "bolted" }],
       designRationale: [{ description: "Generated from the requested mechanical objective." }],
     });
     expect(result.parts[0].geometry.operations[1].parameters.widthMm).toBe(300);
