@@ -44,7 +44,7 @@ describe("robot CAD compiler", () => {
     ], outputOperationId: "rotated" } }] });
     expect(result.unsupportedOperations).toEqual([]);
     expect(result.script).toContain("body.transformBy(matrix)");
-    expect(result.script).toContain("rotationDeg");
+    expect(result.script).toContain("setToRotation");
   });
 
   it("refuses unsupported operations instead of silently substituting geometry", () => {
