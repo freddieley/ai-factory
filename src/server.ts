@@ -5,19 +5,18 @@ import { registerElectronicsSelectionRoutes } from "./electronics-selection-rout
 import { registerElectronicsAnalysisRoutes } from "./electronics-analysis-routes.js";
 import { registerKiCadRoutes } from "./kicad-routes.js";
 import { registerFirmwareRoutes } from "./firmware-routes.js";
+import { registerRobotDesignRoutes } from "./robot-design-routes.js";
 import { readFile } from "node:fs/promises";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { config } from "./config.js";
-
 export { app } from "./api.js";
-
 registerDesignSpaceRoutes(app);
 registerElectronicsRoutes(app);
 registerElectronicsSelectionRoutes(app);
 registerElectronicsAnalysisRoutes(app);
 registerKiCadRoutes(app);
 registerFirmwareRoutes(app);
-
+registerRobotDesignRoutes(app);
 const publicRoot = fileURLToPath(new URL("../public/", import.meta.url));
 async function readPublicFile(filename: string) { return readFile(`${publicRoot}${filename}`); }
 app.get("/", async (_request, reply) => { try { const content = await readPublicFile("index.html"); return reply.type("text/html; charset=utf-8").header("cache-control", "no-store").send(content); } catch { return reply.code(404).send({ error: "operator console not found" }); } });
