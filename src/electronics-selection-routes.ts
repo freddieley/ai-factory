@@ -15,12 +15,15 @@ export function registerElectronicsSelectionRoutes(app: FastifyInstance): void {
       const architecture = ElectronicsArchitecture.parse(body.architecture);
       const selection = selectElectronicsComponents(architecture, listComponents(id), Number(body.resultLimit ?? 20));
       const contentHash = createHash("sha256").update(JSON.stringify(selection)).digest("hex");
-      const artifactId = createArtifact(id, undefined, "electronics_component_selection", "Electronics component selection", undefined, contentHash, {
+      const artifactId = createArtifact(id, undefined, "electronics_component_selection", "Electronics component selection and ERC", undefined, contentHash, {
         schema: selection.schema,
         architectureSchema: selection.architectureSchema,
         selectedComponentIds: selection.selected.map(candidate => candidate.componentId),
         candidateCount: selection.candidates.length,
         blockingFindings: selection.blockingFindings,
+        ercSchema: selection.ruleCheck.schema,
+        ercStatus: selection.ruleCheck.status,
+        ercFindingCount: selection.ruleCheck.findings.length,
       });
       return { artifactId, contentHash, selection };
     } catch (error) {
