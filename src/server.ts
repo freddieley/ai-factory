@@ -4,6 +4,7 @@ import { registerElectronicsRoutes } from "./electronics-routes.js";
 import { registerElectronicsSelectionRoutes } from "./electronics-selection-routes.js";
 import { registerElectronicsAnalysisRoutes } from "./electronics-analysis-routes.js";
 import { registerKiCadRoutes } from "./kicad-routes.js";
+import { registerFirmwareRoutes } from "./firmware-routes.js";
 import { readFile } from "node:fs/promises";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { config } from "./config.js";
@@ -15,6 +16,7 @@ registerElectronicsRoutes(app);
 registerElectronicsSelectionRoutes(app);
 registerElectronicsAnalysisRoutes(app);
 registerKiCadRoutes(app);
+registerFirmwareRoutes(app);
 
 const publicRoot = fileURLToPath(new URL("../public/", import.meta.url));
 async function readPublicFile(filename: string) { return readFile(`${publicRoot}${filename}`); }
