@@ -59,6 +59,19 @@ describe("robot CAD compiler", () => {
     expect(result.script).toContain("setToRotation");
   });
 
+  it("supports a profile transform emitted before or after its extrusion and accepts translateX aliases", () => {
+    const result = compileRobotDesignToFusionScript({ ...design, parts: [{ ...design.parts[0], geometry: { ...design.parts[0].geometry, operations: [
+      { id: "sk", op: "sketch", inputs: [], parameters: {} },
+      { id: "profile", op: "rectangle", inputs: ["sk"], parameters: { widthMm: 150, heightMm: 20 } },
+      { id: "solid", op: "extrude", inputs: ["profile"], parameters: { distanceMm: 3 } },
+      { id: "place", op: "transform", inputs: ["profile"], parameters: { rotateDeg: 45, translateX: -75, translateY: 25 } },
+    ], outputOperationId: "solid" } }] });
+    expect(result.unsupportedOperations).toEqual([]);
+    expect(result.script).toContain("solidByInput[\"profile\"]");
+    expect(result.script).toContain("-7.5");
+    expect(result.script).toContain("2.5");
+  });
+
   it("decodes MCP text content instead of regexing JSON-escaped newlines", () => {
     const result = extractFusionToolText({ content: [{ type: "text", text: "AI_FACTORY_ROBOT_CAD_RESULT\ndesign_hash=abc123\ndocument=Drone\nparts=7\nbodies=7" }] });
     expect(result).toContain("design_hash=abc123\ndocument=Drone");
