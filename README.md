@@ -18,7 +18,7 @@ See **[GOAL.md](./GOAL.md)** for the complete end-state specification and design
 
 ### Phase 3 — Electronics and embedded systems **[current]**
 - [x] Requirements-driven electronics architecture — deterministic architecture synthesis from project electrical requirements, requirement traceability, power-domain extraction, functional blocks, interface identification, explicit open questions, capability discovery, API execution, hash-identified artifact persistence, and unit/API regression coverage.
-- [ ] Schematic and PCB design tool integration.
+- [x] Schematic and PCB design tool integration — real KiCad CLI integration for project-scoped schematic ERC, PCB DRC, optional netlist export, structured validation reports, path isolation, persisted validation artifacts, and KiCad 9 CI integration tests.
 - [ ] Component selection and electrical rule checking.
 - [ ] Power, thermal, signal-integrity, and interface analysis.
 - [ ] Firmware generation, build, flashing, logging, and hardware-in-the-loop interfaces.
