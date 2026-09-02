@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { canonicalRobotDesignJson, robotDesignHash, validateRobotDesign } from "../src/robot-design.js";
+import { canonicalRobotDesignJson, robotDesignHash, validateRobotDesign, parseRobotDesignTransport } from "../src/robot-design.js";
 
 const design = {
   schema: "ai-factory.robot-design/v1",
@@ -39,6 +39,14 @@ describe("model-authored robot design IR", () => {
     expect(result.parts[0].geometry.operations.map(operation => operation.op)).toEqual(["sketch", "extrude", "pattern", "fillet"]);
   });
 
+  it("parses object, JSON-encoded, fenced, and escaped JSON transport", () => {
+    expect(parseRobotDesignTransport(design)).toEqual(design);
+    expect(parseRobotDesignTransport(JSON.stringify(design))).toEqual(design);
+    expect(parseRobotDesignTransport(`\`\`\`json\n${JSON.stringify(design)}\n\`\`\``)).toEqual(design);
+    const escaped = JSON.stringify(design).replace(/"/g, '\\"');
+    expect(parseRobotDesignTransport(escaped)).toEqual(design);
+  });
+
   it("normalizes common model-generated parameter and joint aliases without changing geometry intent", () => {
     const secondPart = { ...design.parts[0], id: "chassis-2", name: "Secondary chassis" };
     const result = validateRobotDesign({
@@ -57,6 +65,12 @@ describe("model-authored robot design IR", () => {
     expect(result.joints[0].childPartId).toBe("chassis-2");
     expect(result.joints[0].type).toBe("fixed");
     expect(result.designRationale[0]).toBe("Generated from the requested mechanical objective.");
+  });
+
+  it("drops legacy single-part mount annotations as explicit normalization notes", () => {
+    const result = validateRobotDesign({ ...design, joints: [{ id: "mount-1", partId: "chassis", type: "fixed", description: "Mount to central hub" }] });
+    expect(result.joints).toEqual([]);
+    expect(result.unresolvedQuestions.some(question => question.includes("mount-1") && question.includes("parentPartId") && question.includes("childPartId"))).toBe(true);
   });
 
   it("rejects dangling geometry references and self-joints", () => {
