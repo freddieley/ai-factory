@@ -87,6 +87,27 @@ describe("model-authored robot design IR", () => {
     expect(result.unresolvedQuestions[0]).toContain("Assumption: Use a conservative standard pattern.");
   });
 
+  it("rejects coincident repeated parts instead of allowing stacked duplicates", () => {
+    const motor = {
+      id: "motor-1",
+      name: "Motor Mount Assembly",
+      material: "Aluminum Alloy 6061",
+      manufacturingProcess: "CNC Machining",
+      geometry: {
+        schema: "ai-factory.robot-geometry/v1",
+        units: "mm",
+        operations: [
+          { id: "sk", op: "sketch", inputs: [], parameters: {} },
+          { id: "plate", op: "rectangle", inputs: ["sk"], parameters: { widthMm: 40, heightMm: 40, centerX: 0, centerY: 0, rotationDeg: 0 } },
+          { id: "solid", op: "extrude", inputs: ["plate"], parameters: { distanceMm: 5 } },
+        ],
+        outputOperationId: "solid",
+      },
+    };
+    const secondMotor = { ...motor, id: "motor-2" };
+    expect(() => validateRobotDesign({ ...design, parts: [motor, secondMotor] })).toThrow("Repeated parts are coincident");
+  });
+
   it("drops legacy single-part mount annotations as explicit normalization notes", () => {
     const result = validateRobotDesign({ ...design, joints: [{ id: "mount-1", partId: "chassis", type: "fixed", description: "Mount to central hub" }] });
     expect(result.joints).toEqual([]);
