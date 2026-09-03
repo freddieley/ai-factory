@@ -47,33 +47,34 @@ describe("robot CAD compiler", () => {
     expect(result.script).toContain("Point3D.create(15,0,0), 1.5");
   });
 
-  it("compiles a model-authored transform for a second crossing frame arm", () => {
+  it("uses the Fusion occurrence transform API for placement", () => {
     const result = compileRobotDesignToFusionScript({ ...design, parts: [{ ...design.parts[0], geometry: { ...design.parts[0].geometry, operations: [
       { id: "sk", op: "sketch", inputs: [], parameters: {} },
-      { id: "profile", op: "rectangle", inputs: ["sk"], parameters: { widthMm: 300, heightMm: 20, centered: true } },
-      { id: "solid", op: "extrude", inputs: ["profile"], parameters: { distanceMm: 2 } },
-      { id: "rotated", op: "transform", inputs: ["solid"], parameters: { rotationDeg: 90, translateXmm: 0, translateYmm: 0 } },
-    ], outputOperationId: "rotated" } }] });
+      { id: "profile", op: "rectangle", inputs: ["sk"], parameters: { widthMm: 150, heightMm: 20, centered: true } },
+      { id: "solid", op: "extrude", inputs: ["profile"], parameters: { distanceMm: 3 } },
+      { id: "placed", op: "transform", inputs: ["solid"], parameters: { rotationDeg: 90, translateXmm: 10, translateYmm: 20 } },
+    ], outputOperationId: "placed" } }] });
     expect(result.unsupportedOperations).toEqual([]);
-    expect(result.script).toContain("solidByInput[\"solid\"] = body");
-    expect(result.script).toContain("body.transformBy(matrix)");
+    expect(result.script).toContain("occurrence = root.occurrences.addNewComponent");
+    expect(result.script).toContain("occurrence.transform2 = matrix");
+    expect(result.script).not.toContain("body.transformBy(matrix)");
     expect(result.script).toContain("setToRotation");
   });
 
-  it("supports a profile transform emitted before or after its extrusion and accepts translateX aliases", () => {
+  it("supports a transform emitted before extrusion and translateX aliases", () => {
     const result = compileRobotDesignToFusionScript({ ...design, parts: [{ ...design.parts[0], geometry: { ...design.parts[0].geometry, operations: [
       { id: "sk", op: "sketch", inputs: [], parameters: {} },
       { id: "profile", op: "rectangle", inputs: ["sk"], parameters: { widthMm: 150, heightMm: 20 } },
-      { id: "solid", op: "extrude", inputs: ["profile"], parameters: { distanceMm: 3 } },
       { id: "place", op: "transform", inputs: ["profile"], parameters: { rotateDeg: 45, translateX: -75, translateY: 25 } },
+      { id: "solid", op: "extrude", inputs: ["profile"], parameters: { distanceMm: 3 } },
     ], outputOperationId: "solid" } }] });
     expect(result.unsupportedOperations).toEqual([]);
-    expect(result.script).toContain("solidByInput[\"profile\"]");
+    expect(result.script).toContain("pendingTransforms[\"profile\"]");
     expect(result.script).toContain("-7.5");
     expect(result.script).toContain("2.5");
   });
 
-  it("compiles model-generated nested sketch profiles instead of rejecting the whole design", () => {
+  it("compiles model-generated nested sketch profiles", () => {
     const result = compileRobotDesignToFusionScript({ ...design, parts: [{ ...design.parts[0], geometry: { ...design.parts[0].geometry, operations: [
       { id: "sk", op: "sketch", inputs: [], parameters: { operations: [
         { id: "arm", op: "rectangle", inputs: [], parameters: { widthMm: 300, heightMm: 15, centerX: 0, centerY: 0, rotationDeg: 45 } },
@@ -85,6 +86,22 @@ describe("robot CAD compiler", () => {
     expect(result.script).toContain("Point3D.create");
     expect(result.script).toContain("sketchCircles.addByCenterRadius");
     expect(result.script).toContain("1.5");
+  });
+
+  it("uses one primary non-circle extrusion profile so sketch holes are not emitted as solid cylinders", () => {
+    const result = compileRobotDesignToFusionScript({ ...design, parts: [{ ...design.parts[0], geometry: { ...design.parts[0].geometry, operations: [
+      { id: "sk", op: "sketch", inputs: [], parameters: {} },
+      { id: "plate", op: "rectangle", inputs: ["sk"], parameters: { widthMm: 100, heightMm: 60, centerX: 50, centerY: 30 } },
+      { id: "h1", op: "circle", inputs: ["sk"], parameters: { radiusMm: 3, centerX: 10, centerY: 10 } },
+      { id: "h2", op: "circle", inputs: ["sk"], parameters: { radiusMm: 3, centerX: 90, centerY: 10 } },
+      { id: "h3", op: "circle", inputs: ["sk"], parameters: { radiusMm: 3, centerX: 10, centerY: 50 } },
+      { id: "h4", op: "circle", inputs: ["sk"], parameters: { radiusMm: 3, centerX: 90, centerY: 50 } },
+      { id: "solid", op: "extrude", inputs: ["plate", "h1", "h2", "h3", "h4"], parameters: { distanceMm: 5 } },
+    ], outputOperationId: "solid" } }] });
+    expect(result.unsupportedOperations).toEqual([]);
+    expect(result.script).toContain("profile = profiles.item(0)");
+    expect(result.script).not.toContain("for profileIndex in range(profiles.count)");
+    expect(result.script.match(/extrudeFeatures\.createInput/g)?.length).toBe(1);
   });
 
   it("rejects disconnected geometry operations instead of executing geometry that is not part of the output", () => {
@@ -117,7 +134,7 @@ describe("robot CAD compiler", () => {
   it("rejects cyclic operation graphs before generating executable CAD", () => {
     expect(() => compileRobotDesignToFusionScript({ ...design, parts: [{ ...design.parts[0], geometry: { ...design.parts[0].geometry, operations: [
       { id: "a", op: "transform", inputs: ["b"], parameters: {} },
-      { id: "b", op: "transform", inputs: ["a"], parameters: {} },
+      { id: "b", op: "transform", inputs: ["a"], parameters: {}, },
     ], outputOperationId: "a" } }] })).toThrow("contains a cycle");
   });
 });
