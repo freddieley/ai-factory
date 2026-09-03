@@ -50,6 +50,35 @@ function sameDesign(a: unknown, b: unknown): boolean {
   }
 }
 
+function normalizeRobotDesignModelOutput(value: unknown): unknown {
+  const transported = parseRobotDesignTransport(value);
+  if (!transported || typeof transported !== "object" || Array.isArray(transported)) return transported;
+  const source = transported as Record<string, unknown>;
+  if (!Array.isArray(source.parts)) return source;
+
+  const parts = source.parts.map(rawPart => {
+    if (!rawPart || typeof rawPart !== "object" || Array.isArray(rawPart)) return rawPart;
+    const part = rawPart as Record<string, unknown>;
+    const geometry = part.geometry;
+    if (Array.isArray(geometry)) {
+      const operations = geometry.filter(item => item && typeof item === "object" && !Array.isArray(item));
+      const lastOperation = operations[operations.length - 1] as Record<string, unknown> | undefined;
+      return {
+        ...part,
+        geometry: {
+          schema: "ai-factory.robot-geometry/v1",
+          units: "mm",
+          operations,
+          outputOperationId: typeof lastOperation?.id === "string" ? lastOperation.id : "",
+        },
+      };
+    }
+    return part;
+  });
+
+  return { ...source, parts };
+}
+
 function buildRetryPrompt(originalPrompt: string, error: string, attempt: number): string {
   return `Build request:\n${originalPrompt}\n\nThis is correction attempt ${attempt}. The deterministic factory rejected the prior submission. Fix the evidence below instead of repeating the prior structure.\n\nREJECTION EVIDENCE:\n${error}\n\nHard contract reminders:\n- Return exactly one complete JSON object.\n- inputs contains strings only.\n- designRationale and unresolvedQuestions are arrays of strings.\n- joints use parentPartId, childPartId, and type; otherwise use joints: [].\n- Do not nest arbitrary operation arrays inside parameters.\n- outputOperationId must exist for every part.\n- Use one consistent coordinate frame across all parts.\n- Derive feature centers from the requested dimensions and the chosen origin.\n- Transform translations are relative placements, not absolute coordinates.\n- For a rectangular outer profile with internal circular holes, the circles represent holes and must not become separate solid bodies.\n- Keep repeated parts geometrically distinct and physically located where the request specifies.\n- Do not claim verificationStatus=verified unless the factory has actually verified the result.\n\nReturn ONLY the corrected JSON object.`;
 }
@@ -121,7 +150,8 @@ export async function runRobotAgent({ projectId, prompt, cycleId, runId, client,
 
       let design: unknown;
       try {
-        design = parseRobotDesignTransport(content);
+        design = normalizeRobotDesignModelOutput(content);
+        design = normalizeRobotDesignModelOutput(design);
       } catch (error) {
         previousError = String(error);
         addEvent(runId, "tool.error", { step: attempt, toolName: "ai_factory_submit_robot_design", error: previousError, phase: "transport" });
