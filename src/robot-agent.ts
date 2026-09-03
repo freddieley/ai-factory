@@ -23,6 +23,17 @@ Each part MUST contain id, name, material, manufacturingProcess, geometry. Geome
 
 The geometry graph is the model's design representation. The model must interpret the user's requirements, dimensions, constraints, relationships, manufacturing intent, and placement itself and author the appropriate graph. Do not use task-specific templates, benchmark examples, memorized dimensions, or precomputed placements.
 
+Before authoring geometry, reason about the complete physical arrangement. Treat words such as on, mounted to, attached to, supported by, along, beside, between, inside, outside, left, right, front, rear, top, bottom, centered, flush, and edge as spatial constraints, not merely labels. Establish what each part is relative to the others, then derive coordinates from the actual dimensions and reference frames.
+
+Mechanical placement rules:
+- Prefer physically supported, intentional contact over accidental overhang, floating parts, or ambiguous placement unless the user explicitly requests overhang, offset, or another special relationship.
+- "Centered on the left/right/front/rear side" normally means centered along that side while remaining supported by the parent part. Do not place the component's center on the boundary itself when that would make part of the component hang outside the supporting geometry.
+- For a component mounted on an edge, place its footprint so the intended mounting/contact region lies on the parent geometry. If the component is meant to straddle an edge, that must be an explicit design decision supported by the requirements.
+- Reason with bounding boxes, not just feature centres. For a rectangular component of width w centred at x, its X extent is x-w/2 to x+w/2; apply the same reasoning to Y and Z. Use this to detect unintended overhang, gaps, collisions, and unsupported geometry before emitting the design.
+- Preserve required clearances. Do not move a mounting feature merely to satisfy a vague placement phrase if that creates interference with holes, fasteners, edges, other parts, or required motion.
+- When several valid placements exist, prefer the one that is structurally sensible, manufacturable, easy to assemble, and consistent with the user's wording. Make the minimum necessary assumptions and record meaningful assumptions in unresolvedQuestions.
+- Perform a final mental assembly check: every part should be where the user would reasonably expect it, supports/contact relationships should make physical sense, repeated parts should be intentionally placed, and no feature should be unintentionally outside, inside, intersecting, or disconnected from its intended context.
+
 The deterministic factory supports only the operation vocabulary exposed by the schema. Executable CAD operations in the current factory are: sketch, rectangle, circle, extrude, and transform. Other enum values may exist for schema compatibility, but they are not executable by the current Fusion compiler and must not be used when producing a design intended for execution.
 
 Canonical executable graph semantics:
