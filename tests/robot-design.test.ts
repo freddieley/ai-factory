@@ -87,10 +87,10 @@ describe("model-authored robot design IR", () => {
     expect(result.unresolvedQuestions[0]).toContain("Assumption: Use a conservative standard pattern.");
   });
 
-  it("rejects coincident repeated parts instead of allowing stacked duplicates", () => {
+  it("rejects coincident repeated parts even when their names differ", () => {
     const motor = {
       id: "motor-1",
-      name: "Motor Mount Assembly",
+      name: "Motor Mount Assembly A",
       material: "Aluminum Alloy 6061",
       manufacturingProcess: "CNC Machining",
       geometry: {
@@ -104,8 +104,33 @@ describe("model-authored robot design IR", () => {
         outputOperationId: "solid",
       },
     };
-    const secondMotor = { ...motor, id: "motor-2" };
+    const secondMotor = { ...motor, id: "motor-2", name: "Motor Mount Assembly B" };
     expect(() => validateRobotDesign({ ...design, parts: [motor, secondMotor] })).toThrow("Repeated parts are coincident");
+  });
+
+  it("does not confuse different part dimensions with coincident repeated parts", () => {
+    const left = {
+      ...design.parts[0],
+      id: "left",
+      name: "Left block",
+      material: "aluminum-6061",
+      manufacturingProcess: "cnc-machining",
+      geometry: {
+        ...design.parts[0].geometry,
+        operations: [
+          { id: "sk", op: "sketch", inputs: [], parameters: {} },
+          { id: "rect", op: "rectangle", inputs: ["sk"], parameters: { widthMm: 20, heightMm: 20, centerX: -40, centerY: 0 } },
+          { id: "solid", op: "extrude", inputs: ["rect"], parameters: { distanceMm: 20 } },
+        ],
+        outputOperationId: "solid",
+      },
+    };
+    const right = { ...left, id: "right", name: "Right block", geometry: { ...left.geometry, operations: [
+      { id: "sk", op: "sketch", inputs: [], parameters: {} },
+      { id: "rect", op: "rectangle", inputs: ["sk"], parameters: { widthMm: 20, heightMm: 20, centerX: 40, centerY: 0 } },
+      { id: "solid", op: "extrude", inputs: ["rect"], parameters: { distanceMm: 20 } },
+    ] } };
+    expect(() => validateRobotDesign({ ...design, parts: [left, right] })).not.toThrow();
   });
 
   it("drops legacy single-part mount annotations as explicit normalization notes", () => {
