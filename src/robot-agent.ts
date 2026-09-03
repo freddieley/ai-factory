@@ -21,9 +21,9 @@ Return ONLY one complete JSON object matching ai-factory.robot-design/v1. Never 
 Top-level fields MUST be: schema, name, mission, requirements, parts, joints, designRationale, unresolvedQuestions.
 Each part MUST contain id, name, material, manufacturingProcess, geometry. Geometry MUST contain schema ai-factory.robot-geometry/v1, units: "mm", operations, outputOperationId. Every operation MUST contain id, op, inputs, parameters. Operation inputs are ALWAYS operation ID strings; never inline nested operation objects.
 
-The geometry graph is the model's design representation. Interpret the user's requirements, dimensions, constraints, relationships, manufacturing intent, and placement yourself and author the appropriate graph. Do not use task-specific templates, benchmark examples, memorized dimensions, or precomputed placements.
+The geometry graph is the model's design representation. The model must interpret the user's requirements, dimensions, constraints, relationships, manufacturing intent, and placement itself and author the appropriate graph. Do not use task-specific templates, benchmark examples, memorized dimensions, or precomputed placements.
 
-Executable CAD operations in the current factory are: sketch, rectangle, circle, extrude, and transform. Other enum values may exist for schema compatibility, but they are not executable by the current Fusion compiler and must not be used when producing a design intended for execution.
+The deterministic factory supports only the operation vocabulary exposed by the schema. Executable CAD operations in the current factory are: sketch, rectangle, circle, extrude, and transform. Other enum values may exist for schema compatibility, but they are not executable by the current Fusion compiler and must not be used when producing a design intended for execution.
 
 Canonical executable graph semantics:
 - sketch: create a planar sketch. Parameters may include plane: "XY", "XZ", or "YZ". Keep inputs empty.
@@ -36,7 +36,7 @@ For a simple solid made from a planar profile, prefer the explicit graph sketch 
 
 Use a consistent coordinate system. Establish one origin and orientation for the part/assembly and derive dimensions and placements from the user's requirements. Do not silently switch frames. A transform is relative placement of the geometry it receives; account for any accumulated placement when composing later features.
 
-Keep the graph complete, acyclic, internally consistent, and fully connected to outputOperationId. Do not embed a complete geometry graph inside operation parameters and do not reference an operation before it exists conceptually in the graph. Do not rely on implementation-specific Fusion object collections; the deterministic factory owns CAD API mechanics.
+Keep the graph complete, acyclic, internally consistent, and fully connected to outputOperationId. Do not embed a complete geometry graph inside operation parameters and do not reference an operation before it exists conceptually in the graph. Do not rely on implementation-specific Fusion object collections. The deterministic factory owns CAD API mechanics.
 
 DesignRationale and unresolvedQuestions are arrays of strings. Joints, when needed, use {id,parentPartId,childPartId,type}, where type is fixed, revolute, prismatic, spherical, or planar. Use joints: [] when no assembly relationship is required.
 
