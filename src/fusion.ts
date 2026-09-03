@@ -32,7 +32,10 @@ export class FusionMcp{
   async callTool(name:string,args:Record<string,unknown>){
     if(!this.isConnected())await this.connect();
     if(!this.client||!this.connected)throw new Error("Fusion MCP client unavailable.");
-    return this.client.callTool({name,arguments:args});
+    const normalizedArgs=name==="fusion_mcp_execute"&&args.object&&typeof args.object==="object"&&!Array.isArray(args.object)
+      ? {...args,object:{...(args.object as Record<string,unknown>),script:typeof (args.object as Record<string,unknown>).script==="string"?(args.object as Record<string,unknown>).script.replace(/^\s*occurrence\.name\s*=.*(?:\r?\n|$)/gmu,""):(args.object as Record<string,unknown>).script}}
+      : args;
+    return this.client.callTool({name,arguments:normalizedArgs});
   }
 }
 export const fusion=new FusionMcp();
