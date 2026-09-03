@@ -55,6 +55,96 @@ function sameDesign(a: unknown, b: unknown): boolean {
   }
 }
 
+function operationParameters(value: unknown): Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  return { ...(value as Record<string, unknown>) };
+}
+
+function normalizedPosition(parameters: Record<string, unknown>): Record<string, unknown> {
+  const normalized = { ...parameters };
+  const position = normalized.position;
+  if (position && typeof position === "object" && !Array.isArray(position)) {
+    const p = position as Record<string, unknown>;
+    if (normalized.centerX === undefined && typeof p.x === "number") normalized.centerX = p.x;
+    if (normalized.centerY === undefined && typeof p.y === "number") normalized.centerY = p.y;
+    delete normalized.position;
+  } else if (Array.isArray(position)) {
+    if (normalized.centerX === undefined && typeof position[0] === "number") normalized.centerX = position[0];
+    if (normalized.centerY === undefined && typeof position[1] === "number") normalized.centerY = position[1];
+    delete normalized.position;
+  }
+  if (normalized.widthMm === undefined && typeof normalized.width === "number") normalized.widthMm = normalized.width;
+  if (normalized.heightMm === undefined && typeof normalized.height === "number") normalized.heightMm = normalized.height;
+  if (normalized.radiusMm === undefined && typeof normalized.radius === "number") normalized.radiusMm = normalized.radius;
+  if (normalized.radiusMm === undefined && typeof normalized.diameter === "number") normalized.radiusMm = normalized.diameter / 2;
+  return normalized;
+}
+
+function normalizeOperationAliases(rawOperation: Record<string, unknown>): Record<string, unknown>[] {
+  const id = typeof rawOperation.id === "string" ? rawOperation.id : "OP";
+  const op = String(rawOperation.op ?? "");
+  const inputs = Array.isArray(rawOperation.inputs)
+    ? rawOperation.inputs.flatMap(input => {
+        if (typeof input === "string") return [input];
+        if (input && typeof input === "object" && !Array.isArray(input) && typeof (input as Record<string, unknown>).id === "string") return [String((input as Record<string, unknown>).id)];
+        return [];
+      })
+    : [];
+  const parameters = normalizedPosition(operationParameters(rawOperation.parameters));
+
+  if (op === "sketch-rectangle") {
+    const profileId = `${id}-profile`;
+    return [{
+      id,
+      op: "sketch",
+      inputs: [],
+      parameters: {
+        plane: parameters.plane ?? "XY",
+        operations: [{ id: profileId, op: "rectangle", inputs: [], parameters: {
+          widthMm: parameters.widthMm,
+          heightMm: parameters.heightMm,
+          centerX: parameters.centerX ?? 0,
+          centerY: parameters.centerY ?? 0,
+          rotationDeg: parameters.rotationDeg ?? 0,
+        } }],
+      },
+    }];
+  }
+
+  if (op === "circular-feature") {
+    const mapped = { ...parameters };
+    delete mapped.type;
+    return [{ id, op: "circle", inputs, parameters: mapped }];
+  }
+
+  if (op === "rectangular-prism") {
+    const sketchId = `${id}-sketch`;
+    const profileId = `${id}-profile`;
+    return [
+      { id: sketchId, op: "sketch", inputs: [], parameters: { plane: "XY" } },
+      { id: profileId, op: "rectangle", inputs: [sketchId], parameters: { widthMm: parameters.widthMm, heightMm: typeof rawOperation.parameters === "object" && rawOperation.parameters !== null && !Array.isArray(rawOperation.parameters) ? (rawOperation.parameters as Record<string, unknown>).depth : parameters.heightMm, centerX: parameters.centerX ?? 0, centerY: parameters.centerY ?? 0, rotationDeg: parameters.rotationDeg ?? 0 } },
+      { id, op: "extrude", inputs: [profileId], parameters: { distanceMm: typeof rawOperation.parameters === "object" && rawOperation.parameters !== null && !Array.isArray(rawOperation.parameters) ? Number((rawOperation.parameters as Record<string, unknown>).height) : numParameter(parameters.heightMm) } },
+    ];
+  }
+
+  if (op === "cylinder") {
+    const sketchId = `${id}-sketch`;
+    const profileId = `${id}-profile`;
+    return [
+      { id: sketchId, op: "sketch", inputs: [], parameters: { plane: "XY" } },
+      { id: profileId, op: "circle", inputs: [sketchId], parameters: { radiusMm: parameters.radiusMm, centerX: parameters.centerX ?? 0, centerY: parameters.centerY ?? 0 } },
+      { id, op: "extrude", inputs: [profileId], parameters: { distanceMm: typeof rawOperation.parameters === "object" && rawOperation.parameters !== null && !Array.isArray(rawOperation.parameters) ? Number((rawOperation.parameters as Record<string, unknown>).height) : 0 } },
+    ];
+  }
+
+  return [{ ...rawOperation, id, op, inputs, parameters }];
+}
+
+function numParameter(value: unknown): number {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : 0;
+}
+
 function normalizeRobotDesignModelOutput(value: unknown): unknown {
   const transported = parseRobotDesignTransport(value);
   if (!transported || typeof transported !== "object" || Array.isArray(transported)) return transported;
@@ -65,20 +155,14 @@ function normalizeRobotDesignModelOutput(value: unknown): unknown {
     if (!rawPart || typeof rawPart !== "object" || Array.isArray(rawPart)) return rawPart;
     const part = rawPart as Record<string, unknown>;
     const geometry = part.geometry;
-    if (Array.isArray(geometry)) {
-      const operations = geometry.filter(item => item && typeof item === "object" && !Array.isArray(item));
-      const lastOperation = operations[operations.length - 1] as Record<string, unknown> | undefined;
-      return {
-        ...part,
-        geometry: {
-          schema: "ai-factory.robot-geometry/v1",
-          units: "mm",
-          operations,
-          outputOperationId: typeof lastOperation?.id === "string" ? lastOperation.id : "",
-        },
-      };
-    }
-    return part;
+    if (!geometry || typeof geometry !== "object" || Array.isArray(geometry)) return part;
+    const g = geometry as Record<string, unknown>;
+    const sourceOperations = Array.isArray(g.operations) ? g.operations : [];
+    const operations = sourceOperations.flatMap(rawOperation => {
+      if (!rawOperation || typeof rawOperation !== "object" || Array.isArray(rawOperation)) return [rawOperation];
+      return normalizeOperationAliases(rawOperation as Record<string, unknown>);
+    });
+    return { ...part, geometry: { ...g, operations } };
   });
 
   return { ...source, parts };
