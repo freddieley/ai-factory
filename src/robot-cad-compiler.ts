@@ -18,8 +18,8 @@ function point(x: number, y: number): string { return `adsk.core.Point3D.create(
 function num(value: unknown, fallback = 0): number { const n = Number(value); return Number.isFinite(n) ? n : fallback; }
 
 function rectangleLines(sketchRef: string, parameters: Record<string, unknown>): string[] | null {
-  const w = num(parameters.widthMm) / 10;
-  const h = num(parameters.heightMm) / 10;
+  const w = num(parameters.widthMm ?? parameters.width) / 10;
+  const h = num(parameters.heightMm ?? parameters.height) / 10;
   const cx = num(parameters.centerX) / 10;
   const cy = num(parameters.centerY) / 10;
   const rotationDeg = num(parameters.rotationDeg);
@@ -36,7 +36,7 @@ function rectangleLines(sketchRef: string, parameters: Record<string, unknown>):
 }
 
 function circleLine(sketchRef: string, parameters: Record<string, unknown>): string | null {
-  const r = num(parameters.radiusMm) / 10;
+  const r = num(parameters.radiusMm ?? parameters.radius) / 10;
   const x = num(parameters.centerX) / 10;
   const y = num(parameters.centerY) / 10;
   if (!(r > 0) || !Number.isFinite(x) || !Number.isFinite(y)) return null;
@@ -62,6 +62,21 @@ function transformLines(spec: TransformSpec): string[] {
   ];
 }
 
+function sourcePlaneExpression(operationById: Map<string, RobotDesign["parts"][number]["geometry"]["operations"][number]>, sourceId: string): string {
+  let current = operationById.get(sourceId);
+  const visited = new Set<string>();
+  while (current && !visited.has(current.id)) {
+    visited.add(current.id);
+    if (current.op === "sketch") {
+      const plane = String(current.parameters.plane ?? "XY").toUpperCase();
+      return plane === "YZ" ? "component.yZConstructionPlane" : plane === "XZ" ? "component.xZConstructionPlane" : "component.xYConstructionPlane";
+    }
+    const nextId = current.inputs[0];
+    current = nextId ? operationById.get(nextId) : undefined;
+  }
+  return "component.xYConstructionPlane";
+}
+
 function compilePart(part: RobotDesign["parts"][number]): { script: string; unsupported: string[] } {
   const unsupported: string[] = [];
   const operationById = new Map(part.geometry.operations.map(operation => [operation.id, operation]));
@@ -74,8 +89,8 @@ function compilePart(part: RobotDesign["parts"][number]): { script: string; unsu
     `features = component.features`,
     `bodiesBefore = component.bRepBodies.count`,
     `pendingTransforms = {}`,
-    `solidByInput = {}`,
   ];
+
   for (const op of part.geometry.operations) {
     const ref = `refs[${py(op.id)}]`;
     switch (op.op) {
@@ -119,19 +134,41 @@ function compilePart(part: RobotDesign["parts"][number]): { script: string; unsu
         break;
       }
       case "circle": {
-        const sketch = op.inputs.length ? `refs[${py(op.inputs[0])}]` : "None";
-        const circle = circleLine(sketch, op.parameters);
-        if (sketch === "None" || !circle) {
+        const sourceId = op.inputs[0] ?? "";
+        const sourceOp = sourceId ? operationById.get(sourceId) : undefined;
+        const circle = sourceId ? circleLine("holeSketch", op.parameters) : null;
+        if (!sourceId || !sourceOp || !circle) {
           unsupported.push(`${part.id}:${op.id}:circle-input-or-radius`);
           break;
         }
-        lines.push(circle, `${ref} = ${sketch}`);
+        if (sourceOp.op === "extrude") {
+          const planeExpr = sourcePlaneExpression(operationById, sourceId);
+          const sourceDistance = num(sourceOp.parameters.distanceMm ?? sourceOp.parameters.distance) / 10;
+          const cutDistance = sourceDistance > 0 ? sourceDistance + 0.1 : 0.1;
+          lines.push(
+            `holeSketch = sketches.add(${planeExpr})`,
+            circle.replace("holeSketch", "holeSketch"),
+            `holeProfiles = holeSketch.profiles`,
+            `if holeProfiles.count < 1: raise RuntimeError(${py(`Hole sketch for ${part.id}:${op.id} produced no closed profile`)})`,
+            `holeProfile = holeProfiles.item(0)`,
+            `cutInput = features.extrudeFeatures.createInput(holeProfile, adsk.fusion.FeatureOperations.CutFeatureOperation)`,
+            `cutInput.setDistanceExtent(False, adsk.core.ValueInput.createByReal(${cutDistance}))`,
+            `cutExtrusion = features.extrudeFeatures.add(cutInput)`,
+            `if not cutExtrusion: raise RuntimeError(${py(`Hole cut failed for ${part.id}:${op.id}`)})`,
+            `if cutExtrusion.bodies.count < 1: raise RuntimeError(${py(`Hole cut produced no result for ${part.id}:${op.id}`)})`,
+            `${ref} = refs[${py(sourceId)}]`,
+            `refs[${py(op.id)}] = refs[${py(sourceId)}]`,
+            `holeCount = holeCount + 1`,
+          );
+        } else {
+          unsupported.push(`${part.id}:${op.id}:circle-source-must-be-extrude`);
+        }
         break;
       }
       case "extrude": {
         const profileInput = op.inputs.find(input => operationById.get(input)?.op !== "circle") ?? op.inputs[0] ?? "";
         const sketch = profileInput ? `refs[${py(profileInput)}]` : "None";
-        const distance = num(op.parameters.distanceMm) / 10;
+        const distance = num(op.parameters.distanceMm ?? op.parameters.distance) / 10;
         if (sketch === "None" || !(distance > 0)) { unsupported.push(`${part.id}:${op.id}:extrude-input-or-distance`); break; }
         lines.push(
           `profiles = ${sketch}.profiles`,
@@ -143,17 +180,15 @@ function compilePart(part: RobotDesign["parts"][number]): { script: string; unsu
           `if not extrusion: raise RuntimeError(${py(`Extrusion failed for ${part.id}:${op.id}`)})`,
           `if extrusion.bodies.count < 1: raise RuntimeError(${py(`Extrusion produced no body for ${part.id}:${op.id}`)})`,
           `body = extrusion.bodies.item(0)`,
-          `solidByInput[${py(profileInput)}] = body`,
-          `solidByInput[${py(op.id)}] = body`,
-          `${ref} = body`,
-          `pending = pendingTransforms.get(${py(profileInput)})`,
+          `refs[${py(op.id)}] = body`,
+          `pending = pendingTransforms.get(${py(op.id)})`,
           `if pending:`,
           `    rotationDeg, tx, ty = pending`,
           `    matrix = adsk.core.Matrix3D.create()`,
           `    matrix.setToRotation(rotationDeg * 3.141592653589793 / 180.0, adsk.core.Vector3D.create(0,0,1), adsk.core.Point3D.create(0,0,0))`,
           `    matrix.translation = adsk.core.Vector3D.create(tx,ty,0)`,
           `    occurrence.transform2 = matrix`,
-          `    pendingTransforms.pop(${py(profileInput)}, None)`,
+          `    pendingTransforms.pop(${py(op.id)}, None)`,
         );
         break;
       }
@@ -168,11 +203,12 @@ function compilePart(part: RobotDesign["parts"][number]): { script: string; unsu
           unsupported.push(`${part.id}:${op.id}:transform-parameters`);
           break;
         }
+        const sourceRef = `refs[${py(sourceId)}]`;
         const sourceOp = operationById.get(sourceId);
         if (sourceOp?.op === "extrude") {
-          lines.push(...transformLines(spec), `${ref} = ${source}`);
+          lines.push(...transformLines(spec), `${ref} = ${sourceRef}`);
         } else {
-          lines.push(`pendingTransforms[${py(sourceId)}] = (${spec.rotationDeg}, ${spec.tx}, ${spec.ty})`, `${ref} = ${source}`);
+          lines.push(`pendingTransforms[${py(sourceId)}] = (${spec.rotationDeg}, ${spec.tx}, ${spec.ty})`, `${ref} = ${sourceRef}`);
         }
         break;
       }
@@ -180,7 +216,10 @@ function compilePart(part: RobotDesign["parts"][number]): { script: string; unsu
         unsupported.push(`${part.id}:${op.id}:${op.op}`);
     }
   }
-  lines.push(`if component.bRepBodies.count - bodiesBefore < 1: raise RuntimeError(${py(`Part ${part.id} produced no solid body`)})`, `createdBodies += component.bRepBodies.count - bodiesBefore`);
+  lines.push(
+    `if component.bRepBodies.count - bodiesBefore < 1: raise RuntimeError(${py(`Part ${part.id} produced no solid body`)})`,
+    `createdBodies += component.bRepBodies.count - bodiesBefore`,
+  );
   return { script: lines.join("\n"), unsupported };
 }
 
@@ -214,6 +253,10 @@ export function compileRobotDesignToFusionScript(input: unknown): { design: Robo
     parts.push(result.script);
     unsupported.push(...result.unsupported);
   }
+  const expectedCuts = design.parts.reduce((total, part) => {
+    const byId = new Map(part.geometry.operations.map(operation => [operation.id, operation]));
+    return total + part.geometry.operations.filter(operation => operation.op === "circle" && operation.inputs.length > 0 && byId.get(operation.inputs[0])?.op === "extrude").length;
+  }, 0);
   const script = [
     "import adsk.core, adsk.fusion",
     "def run(_context: str):",
@@ -227,12 +270,15 @@ export function compileRobotDesignToFusionScript(input: unknown): { design: Robo
     `    doc.attributes.add('AI_FACTORY', 'robot_design_hash', ${py(designHash)})`,
     "    refs = {}",
     "    createdBodies = 0",
+    "    holeCount = 0",
     ...parts.flatMap(part => part.split("\n").map(line => `    ${line}`)),
+    `    actualParts = root.occurrences.count`,
     `    print('AI_FACTORY_ROBOT_CAD_RESULT')`,
     `    print('design_hash=' + ${py(designHash)})`,
     `    print('document=' + app.activeDocument.name)`,
-    `    print('parts=${design.parts.length}')`,
+    `    print('parts=' + str(actualParts))`,
     `    print('bodies=' + str(createdBodies))`,
+    `    print('cuts=' + str(holeCount))`,
   ].join("\n");
   return { design, designHash, script, unsupportedOperations: unsupported };
 }
@@ -240,6 +286,10 @@ export function compileRobotDesignToFusionScript(input: unknown): { design: Robo
 export async function compileRobotDesignToFusion(input: unknown): Promise<RobotCadCompileResult> {
   const compiled = compileRobotDesignToFusionScript(input);
   if (compiled.unsupportedOperations.length) return { schema: "ai-factory.robot-cad-compile/v1", designHash: compiled.designHash, success: false, createdParts: [], unsupportedOperations: compiled.unsupportedOperations, error: "The model-authored design contains geometry operations not yet implemented by the Fusion compiler." };
+  const expectedCuts = compiled.design.parts.reduce((total, part) => {
+    const byId = new Map(part.geometry.operations.map(operation => [operation.id, operation]));
+    return total + part.geometry.operations.filter(operation => operation.op === "circle" && operation.inputs.length > 0 && byId.get(operation.inputs[0])?.op === "extrude").length;
+  }, 0);
   if (!fusion.isConnected()) await fusion.connect();
   try {
     const result = await withTimeout(fusion.callTool("fusion_mcp_execute", { featureType: "script", object: { script: compiled.script } }), config.TOOL_TIMEOUT_MS, "Fusion robot CAD compilation");
@@ -248,9 +298,11 @@ export async function compileRobotDesignToFusion(input: unknown): Promise<RobotC
     const document = text.match(/document=([^\r\n]+)/)?.[1]?.trim();
     const parts = Number(text.match(/parts=(\d+)/)?.[1] ?? 0);
     const bodies = Number(text.match(/bodies=(\d+)/)?.[1] ?? 0);
+    const cuts = Number(text.match(/cuts=(\d+)/)?.[1] ?? 0);
     if (actualHash !== compiled.designHash) return { schema: "ai-factory.robot-cad-compile/v1", designHash: compiled.designHash, success: false, createdParts: [], unsupportedOperations: [], error: `Fusion did not return the expected design hash. Raw result: ${text.slice(0,1000)}` };
     if (parts !== compiled.design.parts.length) return { schema: "ai-factory.robot-cad-compile/v1", designHash: compiled.designHash, success: false, createdParts: [], unsupportedOperations: [], error: `Fusion verified ${parts} parts; expected ${compiled.design.parts.length}.` };
     if (bodies < compiled.design.parts.length) return { schema: "ai-factory.robot-cad-compile/v1", designHash: compiled.designHash, success: false, createdParts: [], unsupportedOperations: [], error: `Fusion verified ${bodies} solid bodies; expected at least ${compiled.design.parts.length}.` };
+    if (cuts !== expectedCuts) return { schema: "ai-factory.robot-cad-compile/v1", designHash: compiled.designHash, success: false, createdParts: [], unsupportedOperations: [], error: `Fusion verified ${cuts} hole cuts; expected ${expectedCuts}.` };
     return { schema: "ai-factory.robot-cad-compile/v1", designHash: compiled.designHash, success: true, document, createdParts: compiled.design.parts.map(part => part.id), unsupportedOperations: [] };
   } catch (error) {
     return { schema: "ai-factory.robot-cad-compile/v1", designHash: compiled.designHash, success: false, createdParts: [], unsupportedOperations: [], error: error instanceof Error ? error.message : String(error) };
