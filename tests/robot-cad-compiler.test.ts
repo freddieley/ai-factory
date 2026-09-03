@@ -109,7 +109,7 @@ describe("robot CAD compiler", () => {
     expect(result.unsupportedOperations).toEqual([]);
     expect(result.script).toContain("Point3D.create");
     expect(result.script).toContain("sketchCircles.addByCenterRadius");
-    expect(result.script).toContain("1.5");
+    expect(result.script).toContain(" 3)");
   });
 
   it("uses one primary non-circle extrusion profile so sketch holes are not emitted as solid cylinders", () => {

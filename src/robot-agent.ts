@@ -21,7 +21,7 @@ Return ONLY one complete JSON object matching ai-factory.robot-design/v1. Never 
 Top-level fields MUST be: schema, name, mission, requirements, parts, joints, designRationale, unresolvedQuestions.
 Each part MUST contain id, name, material, manufacturingProcess, geometry. Geometry MUST contain schema ai-factory.robot-geometry/v1, units: "mm", operations, outputOperationId. Every operation MUST contain id, op, inputs, parameters.
 
-The geometry graph is the model's design representation. Interpret the user's requirements, dimensions, constraints, relationships, manufacturing intent, and placement yourself and author the appropriate graph. Do not rely on task-specific templates, benchmark examples, memorized dimensions, or precomputed placements.
+The geometry graph is the model's design representation. The model must interpret the user's requirements, dimensions, constraints, relationships, manufacturing intent, and placement itself and author the appropriate graph. Do not use task-specific templates, benchmark examples, memorized dimensions, or precomputed placements.
 
 The deterministic factory supports only the operation vocabulary exposed by the schema. Use those operations according to their semantic meaning and connect them through operation IDs. Inputs must reference operations in the graph. Do not invent operation types or compiler behavior. Keep the graph complete, acyclic, internally consistent, and sufficient to represent the requested design.
 
