@@ -136,18 +136,31 @@ function compilePart(part: RobotDesign["parts"][number]): { script: string; unsu
       case "circle": {
         const sourceId = op.inputs[0] ?? "";
         const sourceOp = sourceId ? operationById.get(sourceId) : undefined;
-        const circle = sourceId ? circleLine("holeSketch", op.parameters) : null;
-        if (!sourceId || !sourceOp || !circle) {
+        if (!sourceId || !sourceOp) {
           unsupported.push(`${part.id}:${op.id}:circle-input-or-radius`);
           break;
         }
+        if (sourceOp.op === "sketch") {
+          const circle = circleLine(`refs[${py(sourceId)}]`, op.parameters);
+          if (!circle) {
+            unsupported.push(`${part.id}:${op.id}:circle-input-or-radius`);
+            break;
+          }
+          lines.push(circle, `${ref} = refs[${py(sourceId)}]`);
+          break;
+        }
         if (sourceOp.op === "extrude") {
+          const circle = circleLine("holeSketch", op.parameters);
+          if (!circle) {
+            unsupported.push(`${part.id}:${op.id}:circle-input-or-radius`);
+            break;
+          }
           const planeExpr = sourcePlaneExpression(operationById, sourceId);
           const sourceDistance = num(sourceOp.parameters.distanceMm ?? sourceOp.parameters.distance) / 10;
           const cutDistance = sourceDistance > 0 ? sourceDistance + 0.1 : 0.1;
           lines.push(
             `holeSketch = sketches.add(${planeExpr})`,
-            circle.replace("holeSketch", "holeSketch"),
+            circle,
             `holeProfiles = holeSketch.profiles`,
             `if holeProfiles.count < 1: raise RuntimeError(${py(`Hole sketch for ${part.id}:${op.id} produced no closed profile`)})`,
             `holeProfile = holeProfiles.item(0)`,
@@ -155,13 +168,11 @@ function compilePart(part: RobotDesign["parts"][number]): { script: string; unsu
             `cutInput.setDistanceExtent(False, adsk.core.ValueInput.createByReal(${cutDistance}))`,
             `cutExtrusion = features.extrudeFeatures.add(cutInput)`,
             `if not cutExtrusion: raise RuntimeError(${py(`Hole cut failed for ${part.id}:${op.id}`)})`,
-            `if cutExtrusion.bodies.count < 1: raise RuntimeError(${py(`Hole cut produced no result for ${part.id}:${op.id}`)})`,
             `${ref} = refs[${py(sourceId)}]`,
-            `refs[${py(op.id)}] = refs[${py(sourceId)}]`,
             `holeCount = holeCount + 1`,
           );
         } else {
-          unsupported.push(`${part.id}:${op.id}:circle-source-must-be-extrude`);
+          unsupported.push(`${part.id}:${op.id}:circle-source-must-be-sketch-or-extrude`);
         }
         break;
       }
