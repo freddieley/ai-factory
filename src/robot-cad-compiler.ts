@@ -310,23 +310,63 @@ function compileAssemblyJoints(design: RobotDesign): { script: string; unsupport
 }
 
 export function extractFusionToolText(result: unknown): string {
-  if (typeof result === "string") return result;
-  if (result && typeof result === "object" && !Array.isArray(result)) {
-    const record = result as Record<string, unknown>;
-    const content = record.content;
-    if (Array.isArray(content)) {
-      const textParts = content.flatMap(item => {
-        if (!item || typeof item !== "object" || Array.isArray(item)) return [];
-        const text = (item as Record<string, unknown>).text;
-        return typeof text === "string" ? [text] : [];
-      });
-      if (textParts.length) return textParts.join("\n");
+  const decode = (value: unknown): string | undefined => {
+    if (typeof value === "string") {
+      try {
+        const parsed = JSON.parse(value);
+        if (parsed && typeof parsed === "object") return decode(parsed);
+      } catch { /* raw tool text */ }
+      return value;
     }
-    const structured = record.structuredContent;
-    if (structured !== undefined) return typeof structured === "string" ? structured : JSON.stringify(structured);
-    if (typeof record.message === "string") return record.message;
+    if (Array.isArray(value)) {
+      const parts = value.map(decode).filter((part): part is string => Boolean(part));
+      return parts.length ? parts.join("\n") : undefined;
+    }
+    if (value && typeof value === "object") {
+      const record = value as Record<string, unknown>;
+      if (record.content !== undefined) {
+        const content = decode(record.content);
+        if (content) return content;
+      }
+      if (record.structuredContent !== undefined) {
+        const structured = decode(record.structuredContent);
+        if (structured) return structured;
+      }
+      if (typeof record.message === "string") return decode(record.message);
+      if (typeof record.text === "string") return decode(record.text);
+    }
+    return undefined;
+  };
+  return decode(result) ?? JSON.stringify(result);
+}
+
+function cleanupFusionDocumentScript(designHash: string): string {
+  return [
+    "import adsk.core",
+    "def run(_context: str):",
+    "    app = adsk.core.Application.get()",
+    "    for i in range(app.documents.count - 1, -1, -1):",
+    "        doc = app.documents.item(i)",
+    `        attr = doc.attributes.itemByName('AI_FACTORY', 'robot_design_hash') if doc else None`,
+    `        if attr and attr.value == ${py(designHash)}:`,
+    "            doc.close(False)",
+    `            print('AI_FACTORY_ROBOT_CAD_CLEANUP\ndesign_hash=${designHash}\nclosed=true')`,
+    "            return",
+    `    print('AI_FACTORY_ROBOT_CAD_CLEANUP\ndesign_hash=${designHash}\nclosed=false')`,
+  ].join("\n");
+}
+
+async function cleanupFailedFusionDocument(designHash: string): Promise<void> {
+  try {
+    if (!fusion.isConnected()) await fusion.connect();
+    await withTimeout(
+      fusion.callTool("fusion_mcp_execute", { featureType: "script", object: { script: cleanupFusionDocumentScript(designHash) } }),
+      config.TOOL_TIMEOUT_MS,
+      "Fusion failed CAD cleanup",
+    );
+  } catch {
+    // Cleanup is best-effort; preserve the original CAD failure.
   }
-  return JSON.stringify(result);
 }
 
 export function compileRobotDesignToFusionScript(input: unknown): { design: RobotDesign; designHash: string; script: string; unsupportedOperations: string[] } {
@@ -360,6 +400,10 @@ export async function compileRobotDesignToFusion(input: unknown): Promise<RobotC
     return total + part.geometry.operations.filter(operation => operation.op === "circle" && operation.inputs.length > 0 && byId.get(operation.inputs[0])?.op === "extrude").length;
   }, 0);
   if (!fusion.isConnected()) await fusion.connect();
+  const fail = async (error: string): Promise<RobotCadCompileResult> => {
+    await cleanupFailedFusionDocument(compiled.designHash);
+    return { schema: "ai-factory.robot-cad-compile/v1", designHash: compiled.designHash, success: false, createdParts: [], unsupportedOperations: [], error };
+  };
   try {
     const result = await withTimeout(fusion.callTool("fusion_mcp_execute", { featureType: "script", object: { script: compiled.script } }), config.TOOL_TIMEOUT_MS, "Fusion robot CAD compilation");
     const text = extractFusionToolText(result);
@@ -369,13 +413,13 @@ export async function compileRobotDesignToFusion(input: unknown): Promise<RobotC
     const bodies = Number(text.match(/bodies=(\d+)/)?.[1] ?? 0);
     const cuts = Number(text.match(/cuts=(\d+)/)?.[1] ?? 0);
     const joints = Number(text.match(/joints=(\d+)/)?.[1] ?? 0);
-    if (actualHash !== compiled.designHash) return { schema: "ai-factory.robot-cad-compile/v1", designHash: compiled.designHash, success: false, createdParts: [], unsupportedOperations: [], error: `Fusion did not return the expected design hash. Raw result: ${text.slice(0,1000)}` };
-    if (parts !== compiled.design.parts.length) return { schema: "ai-factory.robot-cad-compile/v1", designHash: compiled.designHash, success: false, createdParts: [], unsupportedOperations: [], error: `Fusion verified ${parts} parts; expected ${compiled.design.parts.length}.` };
-    if (bodies < compiled.design.parts.length) return { schema: "ai-factory.robot-cad-compile/v1", designHash: compiled.designHash, success: false, createdParts: [], unsupportedOperations: [], error: `Fusion verified ${bodies} solid bodies; expected at least ${compiled.design.parts.length}.` };
-    if (cuts !== expectedCuts) return { schema: "ai-factory.robot-cad-compile/v1", designHash: compiled.designHash, success: false, createdParts: [], unsupportedOperations: [], error: `Fusion verified ${cuts} hole cuts; expected ${expectedCuts}.` };
-    if (joints !== compiled.design.joints.length) return { schema: "ai-factory.robot-cad-compile/v1", designHash: compiled.designHash, success: false, createdParts: [], unsupportedOperations: [], error: `Fusion verified ${joints} assembly joints; expected ${compiled.design.joints.length}.` };
+    if (actualHash !== compiled.designHash) return await fail(`Fusion did not return the expected design hash. Raw result: ${text.slice(0,1000)}`);
+    if (parts !== compiled.design.parts.length) return await fail(`Fusion verified ${parts} parts; expected ${compiled.design.parts.length}.`);
+    if (bodies < compiled.design.parts.length) return await fail(`Fusion verified ${bodies} solid bodies; expected at least ${compiled.design.parts.length}.`);
+    if (cuts !== expectedCuts) return await fail(`Fusion verified ${cuts} hole cuts; expected ${expectedCuts}.`);
+    if (joints !== compiled.design.joints.length) return await fail(`Fusion verified ${joints} assembly joints; expected ${compiled.design.joints.length}.`);
     return { schema: "ai-factory.robot-cad-compile/v1", designHash: compiled.designHash, success: true, document, createdParts: compiled.design.parts.map(part => part.id), unsupportedOperations: [] };
   } catch (error) {
-    return { schema: "ai-factory.robot-cad-compile/v1", designHash: compiled.designHash, success: false, createdParts: [], unsupportedOperations: [], error: error instanceof Error ? error.message : String(error) };
+    return await fail(error instanceof Error ? error.message : String(error));
   }
 }
