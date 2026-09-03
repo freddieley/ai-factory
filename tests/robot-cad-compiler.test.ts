@@ -30,7 +30,7 @@ describe("robot CAD compiler", () => {
     const result = compileRobotDesignToFusionScript(design);
     expect(result.unsupportedOperations).toEqual([]);
     expect(result.script).toContain('refs["solid"] = body');
-    expect(result.script).toContain('solidByInput["solid"] = body');
+    expect(result.script).toContain('pendingTransforms.get("solid")');
   });
 
   it("honors model-authored rectangle center and rotation", () => {
@@ -54,6 +54,22 @@ describe("robot CAD compiler", () => {
     expect(result.script).toContain("Point3D.create(15,0,0), 1.5");
   });
 
+  it("compiles circles after an extrusion as subtractive hole cuts", () => {
+    const result = compileRobotDesignToFusionScript({ ...design, parts: [{ ...design.parts[0], geometry: { ...design.parts[0].geometry, operations: [
+      { id: "sk", op: "sketch", inputs: [], parameters: { plane: "XY" } },
+      { id: "plate", op: "rectangle", inputs: ["sk"], parameters: { widthMm: 100, heightMm: 60, centerX: 0, centerY: 0 } },
+      { id: "solid", op: "extrude", inputs: ["plate"], parameters: { distanceMm: 5 } },
+      { id: "hole", op: "circle", inputs: ["solid"], parameters: { radiusMm: 3, centerX: -40, centerY: -20 } },
+    ], outputOperationId: "hole" } }] });
+    expect(result.unsupportedOperations).toEqual([]);
+    expect(result.script).toContain("holeSketch = sketches.add(component.xYConstructionPlane)");
+    expect(result.script).toContain("adsk.fusion.FeatureOperations.CutFeatureOperation");
+    expect(result.script).toContain("cutExtrusion = features.extrudeFeatures.add(cutInput)");
+    expect(result.script).toContain('refs["hole"] = refs["solid"]');
+    expect(result.script).toContain("holeCount = holeCount + 1");
+    expect(result.script).not.toContain('refs["hole"] = holeSketch');
+  });
+
   it("uses the Fusion occurrence transform API for placement", () => {
     const result = compileRobotDesignToFusionScript({ ...design, parts: [{ ...design.parts[0], geometry: { ...design.parts[0].geometry, operations: [
       { id: "sk", op: "sketch", inputs: [], parameters: {} },
@@ -66,7 +82,7 @@ describe("robot CAD compiler", () => {
     expect(result.script).toContain("occurrence.transform2 = matrix");
     expect(result.script).not.toContain("body.transformBy(matrix)");
     expect(result.script).toContain("setToRotation");
-    expect(result.script.match(/occurrence\.transform2 = matrix/g)?.length).toBe(1);
+    expect(result.script).toContain('refs["placed"] = refs["solid"]');
   });
 
   it("supports a transform emitted before extrusion and translateX aliases", () => {
