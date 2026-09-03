@@ -29,7 +29,13 @@ Every part MUST set outputOperationId to the final operation ID. No missing, dan
 
 designRationale MUST be an ARRAY OF STRINGS. unresolvedQuestions MUST be an ARRAY OF STRINGS. A joint, when present, MUST use {id,parentPartId,childPartId,type} where type is fixed, revolute, prismatic, spherical, or planar. Do not use partIds, part1Id, part2Id, or jointType. Use joints: [] unless a real two-part assembly relationship is required.
 
-Design the requested object yourself. Do not use a factory template. Interpret overall dimensions such as a 300 mm frame span as plan-view dimensions, never as extrusion thickness. Make conservative engineering assumptions when the request is underspecified and record them in unresolvedQuestions. Keep structural thickness physically sensible. Repeated components must be placed at distinct intended positions using transform or explicit rectangle/circle centers. The final graph must represent the requested geometry, not merely placeholders.`;
+Use one consistent coordinate system for the whole design. Prefer the primary part's natural center at (0,0) unless the request explicitly defines another origin. Express symmetric features about that origin. Do not mix absolute coordinates with translations that assume a different origin. A placement transform is relative to the geometry's current coordinates, so calculate the resulting world position explicitly.
+
+For a rectangular plate centered at the origin, corner offsets are half the width/height. For features specified by distance from an edge or corner, derive their absolute coordinates from the same plate coordinate system rather than inventing a second coordinate frame.
+
+When a part contains a rectangular outer boundary and circular holes in the same sketch, model the rectangle as the primary solid profile and the circles as internal holes; do not create separate solid cylinders for the holes. When repeated parts are needed, give each instance a genuinely distinct placement. Avoid coincident duplicate parts.
+
+Design the requested object yourself. Do not use a factory template. Interpret overall dimensions as plan-view dimensions, never as extrusion thickness. Make conservative engineering assumptions when the request is underspecified and record them in unresolvedQuestions. Keep structural thickness physically sensible. The final graph must represent the requested geometry, not merely placeholders.`;
 
 function compactEvidence(value: unknown, maxLength = 4_000): string {
   const text = JSON.stringify(value);
@@ -45,7 +51,7 @@ function sameDesign(a: unknown, b: unknown): boolean {
 }
 
 function buildRetryPrompt(originalPrompt: string, error: string, attempt: number): string {
-  return `Build request:\n${originalPrompt}\n\nThis is correction attempt ${attempt}. The deterministic factory rejected the prior submission. Fix the evidence below instead of repeating the prior structure.\n\nREJECTION EVIDENCE:\n${error}\n\nHard contract reminders:\n- Return exactly one complete JSON object.\n- inputs contains strings only.\n- designRationale and unresolvedQuestions are arrays of strings.\n- joints use parentPartId, childPartId, and type; otherwise use joints: [].\n- Do not nest arbitrary operation arrays inside parameters.\n- outputOperationId must exist for every part.\n- Keep geometry physically sensible and place repeated parts distinctly.\n\nReturn ONLY the corrected JSON object.`;
+  return `Build request:\n${originalPrompt}\n\nThis is correction attempt ${attempt}. The deterministic factory rejected the prior submission. Fix the evidence below instead of repeating the prior structure.\n\nREJECTION EVIDENCE:\n${error}\n\nHard contract reminders:\n- Return exactly one complete JSON object.\n- inputs contains strings only.\n- designRationale and unresolvedQuestions are arrays of strings.\n- joints use parentPartId, childPartId, and type; otherwise use joints: [].\n- Do not nest arbitrary operation arrays inside parameters.\n- outputOperationId must exist for every part.\n- Use one consistent coordinate frame across all parts.\n- Derive feature centers from the requested dimensions and the chosen origin.\n- Transform translations are relative placements, not absolute coordinates.\n- For a rectangular outer profile with internal circular holes, the circles represent holes and must not become separate solid bodies.\n- Keep repeated parts geometrically distinct and physically located where the request specifies.\n- Do not claim verificationStatus=verified unless the factory has actually verified the result.\n\nReturn ONLY the corrected JSON object.`;
 }
 
 async function requestRobotModel(client: any, model: string, temperature: number, messages: any[], signal: AbortSignal): Promise<any> {
