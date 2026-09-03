@@ -9,14 +9,14 @@ permissions:
 
 jobs:
   patch:
-    if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - name: Apply patches
-        shell: python
         run: |
+          python3 - <<'PY'
           from pathlib import Path
+          import subprocess
 
           robot_agent = Path("src/robot-agent.ts")
           text = robot_agent.read_text()
@@ -95,7 +95,6 @@ jobs:
           if old_event not in text:
               raise SystemExit("robot-agent model event marker not found")
           text = text.replace(old_event, new_event, 1)
-
           robot_agent.write_text(text)
 
           robot_design = Path("src/robot-design.ts")
@@ -125,13 +124,6 @@ jobs:
               text = text.replace(needle, addition + needle, 1)
           prompt_test.write_text(text)
 
-          cad_test = Path("tests/robot-cad-compiler.test.ts")
-          text = cad_test.read_text()
-          old_fixture = '''{ id: "orphan", op: "transform", inputs: ["profile"], parameters: { translateXmm: 25 } },'''
-          if old_fixture not in text:
-              raise SystemExit("robot-cad test orphan fixture marker not found")
-
-          subprocess = __import__("subprocess")
           subprocess.run(["npm", "run", "typecheck"], check=True)
           subprocess.run(["npx", "vitest", "run", "tests/robot-design.test.ts", "tests/robot-cad-compiler.test.ts", "tests/robot-assembly.test.ts", "tests/robot-agent-prompt-integrity.test.ts", "tests/robot-semantic-verifier.test.ts", "--fileParallelism=false"], check=True)
 
@@ -141,3 +133,4 @@ jobs:
           subprocess.run(["git", "rm", ".github/workflows/apply-robot-agent-patches.yml"], check=True)
           subprocess.run(["git", "commit", "-m", "Fix robot model generation recovery and CAD graph validation"], check=True)
           subprocess.run(["git", "push", "origin", "HEAD:main"], check=True)
+          PY
