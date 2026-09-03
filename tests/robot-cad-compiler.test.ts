@@ -149,6 +149,13 @@ describe("robot CAD compiler", () => {
     expect(result).toContain("parts=6");
   });
 
+  it("decodes a JSON-encoded MCP text envelope", () => {
+    const result = extractFusionToolText({ content: [{ type: "text", text: JSON.stringify({ message: "AI_FACTORY_ROBOT_CAD_RESULT\ndesign_hash=abc123\ndocument=Untitled\nparts=3\nbodies=3\ncuts=4\njoints=0", success: true }) }] });
+    expect(result).toContain("design_hash=abc123");
+    expect(result).toContain("parts=3");
+    expect(result).toContain("cuts=4");
+  });
+
   it("refuses unsupported operations instead of silently substituting geometry", () => {
     const result = compileRobotDesignToFusionScript({ ...design, parts: [{ ...design.parts[0], geometry: { ...design.parts[0].geometry, operations: [{ id: "s", op: "sweep", inputs: [], parameters: {} }], outputOperationId: "s" } }] });
     expect(result.unsupportedOperations).toContain("body:s:sweep");
