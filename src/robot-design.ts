@@ -218,10 +218,19 @@ function partPlacementSignature(part: RobotPart): string {
   const values: string[] = [];
   for (const operation of part.geometry.operations) {
     const p = operation.parameters;
-    if (operation.op === "rectangle" || operation.op === "circle") {
-      values.push(`${operation.op}:${String(p.centerX ?? 0)},${String(p.centerY ?? 0)},${String(p.rotationDeg ?? 0)}`);
-    } else if (operation.op === "transform") {
-      values.push(`transform:${String(p.translateXmm ?? p.translateX ?? 0)},${String(p.translateYmm ?? p.translateY ?? 0)},${String(p.rotationDeg ?? p.rotateDeg ?? 0)}`);
+    switch (operation.op) {
+      case "rectangle":
+      case "circle":
+        values.push(`${operation.op}:${String(p.widthMm ?? p.width ?? "")},${String(p.heightMm ?? p.height ?? "")},${String(p.radiusMm ?? p.radius ?? "")},${String(p.centerX ?? 0)},${String(p.centerY ?? 0)},${String(p.rotationDeg ?? 0)}`);
+        break;
+      case "extrude":
+        values.push(`extrude:${String(p.distanceMm ?? p.distance ?? "")}`);
+        break;
+      case "transform":
+        values.push(`transform:${String(p.translateXmm ?? p.translateX ?? 0)},${String(p.translateYmm ?? p.translateY ?? 0)},${String(p.rotationDeg ?? p.rotateDeg ?? 0)}`);
+        break;
+      default:
+        values.push(`${operation.op}:${JSON.stringify(p)}`);
     }
   }
   return values.join("|");
@@ -230,7 +239,7 @@ function partPlacementSignature(part: RobotPart): string {
 function assertRepeatedPartsArePlacedDistinctly(parts: RobotPart[]): void {
   const groups = new Map<string, RobotPart[]>();
   for (const part of parts) {
-    const key = `${part.name.toLowerCase().trim()}|${part.material.toLowerCase().trim()}|${part.manufacturingProcess.toLowerCase().trim()}`;
+    const key = `${part.material.toLowerCase().trim()}|${part.manufacturingProcess.toLowerCase().trim()}`;
     const group = groups.get(key) ?? [];
     group.push(part);
     groups.set(key, group);
@@ -238,8 +247,14 @@ function assertRepeatedPartsArePlacedDistinctly(parts: RobotPart[]): void {
   for (const [key, group] of groups) {
     if (group.length < 2) continue;
     const signatures = group.map(partPlacementSignature);
-    if (signatures.every(signature => signature === signatures[0])) {
-      throw new Error(`Repeated parts are coincident: ${key}. Distinct repeated components must have distinct sketch centers or transform placements.`);
+    const seen = new Map<string, RobotPart>();
+    for (let i = 0; i < signatures.length; i++) {
+      const signature = signatures[i];
+      const previous = seen.get(signature);
+      if (previous) {
+        throw new Error(`Repeated parts are coincident: ${key}. Parts ${previous.id} and ${group[i].id} have identical geometry, dimensions, and placement. Distinct repeated components must have distinct placements.`);
+      }
+      seen.set(signature, group[i]);
     }
   }
 }
@@ -262,7 +277,10 @@ export function validateRobotDesign(input: unknown): RobotDesign {
 
 export function canonicalRobotDesignJson(input: unknown): string {
   const design = validateRobotDesign(input);
-  const normalized = { ...design, requirements: [...design.requirements].sort((a,b) => a.id.localeCompare(b.id)), parts: [...design.parts].sort((a,b) => a.id.localeCompare(b.id)).map(part => ({ ...part, geometry: { ...part.geometry, operations: [...part.geometry.operations].sort((a,b) => a.id.localeCompare(b.id)) } })), joints: [...design.joints].sort((a,b) => a.id.localeCompare(b.id)) };
+  const normalized = { ...design, requirements: [...design.requirements].sort((a,b) => a.id.localeCompare(b.id)), parts: [...design.parts].sort((a,b) => a.id.localeCompare(b.id)), joints: [...design.joints].sort((a,b) => a.id.localeCompare(b.id)) };
   return JSON.stringify(normalized);
 }
-export function robotDesignHash(input: unknown): string { return createHash("sha256").update(canonicalRobotDesignJson(input)).digest("hex"); }
+
+export function robotDesignHash(input: unknown): string {
+  return createHash("sha256").update(canonicalRobotDesignJson(input), "utf8").digest("hex");
+}
