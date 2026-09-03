@@ -26,6 +26,13 @@ describe("robot CAD compiler", () => {
     expect(result.script).not.toContain("executeCreateBox");
   });
 
+  it("registers extrusion results by operation id so downstream transforms can reference them", () => {
+    const result = compileRobotDesignToFusionScript(design);
+    expect(result.unsupportedOperations).toEqual([]);
+    expect(result.script).toContain('refs["solid"] = body');
+    expect(result.script).toContain('solidByInput["solid"] = body');
+  });
+
   it("honors model-authored rectangle center and rotation", () => {
     const result = compileRobotDesignToFusionScript({ ...design, parts: [{ ...design.parts[0], geometry: { ...design.parts[0].geometry, operations: [
       { id: "sk", op: "sketch", inputs: [], parameters: {} },
@@ -59,6 +66,7 @@ describe("robot CAD compiler", () => {
     expect(result.script).toContain("occurrence.transform2 = matrix");
     expect(result.script).not.toContain("body.transformBy(matrix)");
     expect(result.script).toContain("setToRotation");
+    expect(result.script.match(/occurrence\.transform2 = matrix/g)?.length).toBe(1);
   });
 
   it("supports a transform emitted before extrusion and translateX aliases", () => {
