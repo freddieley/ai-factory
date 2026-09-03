@@ -1,4 +1,4 @@
-import { robotDesignHash, validateRobotDesign, RobotDesign } from "./robot-design.js";
+import { robotDesignHash, validateRobotDesign, RobotDesign, RobotJoint } from "./robot-design.js";
 import { config } from "./config.js";
 import { fusion } from "./fusion.js";
 import { withTimeout } from "./execution.js";
@@ -86,6 +86,7 @@ function compilePart(part: RobotDesign["parts"][number]): { script: string; unsu
     `occurrence = root.occurrences.addNewComponent(adsk.core.Matrix3D.create())`,
     `component = occurrence.component`,
     `component.name = ${py(part.name)}`,
+    `occurrence.name = ${py(part.id)}`,
     `sketches = component.sketches`,
     `features = component.features`,
     `bodiesBefore = component.bRepBodies.count`,
@@ -235,6 +236,79 @@ function compilePart(part: RobotDesign["parts"][number]): { script: string; unsu
   return { script: lines.join("\n"), unsupported };
 }
 
+function jointDirectionExpression(value: unknown): string {
+  switch (String(value ?? "Z").toUpperCase()) {
+    case "X": return "adsk.fusion.JointDirections.XAxisJointDirection";
+    case "Y": return "adsk.fusion.JointDirections.YAxisJointDirection";
+    default: return "adsk.fusion.JointDirections.ZAxisJointDirection";
+  }
+}
+
+function compileAssemblyJoints(design: RobotDesign): { script: string; unsupported: string[] } {
+  const unsupported: string[] = [];
+  if (design.joints.length === 0) return { script: "", unsupported };
+  const partIndex = new Map(design.parts.map((part, index) => [part.id, index]));
+  const lines: string[] = [
+    "# AI Factory assembly constraints",
+    "occurrences = root.occurrences",
+    "jointCreatedIds = []",
+    "for i in range(1, occurrences.count): occurrences.item(i).isGroundToParent = False",
+  ];
+  design.joints.forEach((joint, index) => {
+    const parentIndex = partIndex.get(joint.parentPartId);
+    const childIndex = partIndex.get(joint.childPartId);
+    if (parentIndex === undefined || childIndex === undefined) { unsupported.push(`joint:${joint.id}:unknown-part`); return; }
+    const p = joint.parameters;
+    const anchorX = num(p.anchorXmm ?? p.xMm ?? p.x) / 10;
+    const anchorY = num(p.anchorYmm ?? p.yMm ?? p.y) / 10;
+    const anchorZ = num(p.anchorZmm ?? p.zMm ?? p.z);
+    if (anchorZ !== 0) unsupported.push(`joint:${joint.id}:anchorZ-not-supported-by-sketch-point`);
+    const axis = jointDirectionExpression(p.axis ?? p.jointAxis);
+    const parent = `parentOcc${index}`; const child = `childOcc${index}`;
+    const parentSketch = `parentJointSketch${index}`; const childSketch = `childJointSketch${index}`;
+    const parentPoint = `parentJointPoint${index}`; const childPoint = `childJointPoint${index}`;
+    const parentGeo = `parentJointGeo${index}`; const childGeo = `childJointGeo${index}`;
+    const input = `jointInput${index}`; const created = `joint${index}`;
+    lines.push(
+      `${parent} = occurrences.item(${parentIndex})`, `${child} = occurrences.item(${childIndex})`,
+      `if not ${parent} or not ${child}: raise RuntimeError(${py(`Joint ${joint.id} could not resolve component occurrences`)})`,
+      `${parentSketch} = ${parent}.component.sketches.add(${parent}.component.xYConstructionPlane)`,
+      `${childSketch} = ${child}.component.sketches.add(${child}.component.xYConstructionPlane)`,
+      `${parentPoint} = ${parentSketch}.sketchPoints.add(adsk.core.Point3D.create(${anchorX},${anchorY},0))`,
+      `${childPoint} = ${childSketch}.sketchPoints.add(adsk.core.Point3D.create(${anchorX},${anchorY},0))`,
+      `${parentPoint} = ${parentPoint}.createForAssemblyContext(${parent})`, `${childPoint} = ${childPoint}.createForAssemblyContext(${child})`,
+      `${parentGeo} = adsk.fusion.JointGeometry.createByPoint(${parentPoint})`, `${childGeo} = adsk.fusion.JointGeometry.createByPoint(${childPoint})`,
+      `if not ${parentGeo} or not ${childGeo}: raise RuntimeError(${py(`Joint ${joint.id} geometry creation failed`)})`,
+      `${input} = root.joints.createInput(${parentGeo}, ${childGeo})`,
+      `if not ${input}: raise RuntimeError(${py(`Joint ${joint.id} input creation failed`)})`,
+    );
+    switch (joint.type) {
+      case "fixed": lines.push(`if not ${input}.setAsRigidJointMotion(): raise RuntimeError(${py(`Joint ${joint.id} rigid configuration failed`)})`); break;
+      case "revolute": lines.push(`if not ${input}.setAsRevoluteJointMotion(${axis}): raise RuntimeError(${py(`Joint ${joint.id} revolute configuration failed`)})`); break;
+      case "prismatic": lines.push(`if not ${input}.setAsSliderJointMotion(${axis}): raise RuntimeError(${py(`Joint ${joint.id} slider configuration failed`)})`); break;
+      case "spherical": lines.push(`if not ${input}.setAsBallJointMotion(adsk.fusion.JointDirections.ZAxisJointDirection, adsk.fusion.JointDirections.XAxisJointDirection): raise RuntimeError(${py(`Joint ${joint.id} ball configuration failed`)})`); break;
+      case "planar": lines.push(`if not ${input}.setAsPlanarJointMotion(${axis}): raise RuntimeError(${py(`Joint ${joint.id} planar configuration failed`)})`); break;
+    }
+    const offsetMm = num(p.offsetMm); const angleDeg = num(p.angleDeg);
+    if (offsetMm !== 0) lines.push(`${input}.offset = adsk.core.ValueInput.createByString(${py(`${offsetMm} mm`)})`);
+    if (angleDeg !== 0) lines.push(`${input}.angle = adsk.core.ValueInput.createByString(${py(`${angleDeg} deg`)})`);
+    if (p.flipped === true) lines.push(`${input}.isFlipped = True`);
+    lines.push(`${created} = root.joints.add(${input})`, `if not ${created}: raise RuntimeError(${py(`Fusion failed to create joint ${joint.id}`)})`, `${created}.name = ${py(joint.id)}`, `jointCreatedIds.append(${py(joint.id)})`);
+    const min = p.minimum; const max = p.maximum;
+    if (min !== undefined || max !== undefined) {
+      lines.push(`motion${index} = ${created}.jointMotion`, `if not motion${index}: raise RuntimeError(${py(`Joint ${joint.id} has no motion object`)})`);
+      if (joint.type === "revolute") lines.push(`limits${index} = motion${index}.rotationLimits`);
+      else if (joint.type === "prismatic") lines.push(`limits${index} = motion${index}.slideLimits`);
+      else lines.push(`limits${index} = None`);
+      lines.push(`if limits${index}:`);
+      if (min !== undefined) lines.push(`    limits${index}.isMinimumValueEnabled = True`, `    limits${index}.minimumValue = ${num(min)}`);
+      if (max !== undefined) lines.push(`    limits${index}.isMaximumValueEnabled = True`, `    limits${index}.maximumValue = ${num(max)}`);
+    }
+  });
+  lines.push(`if len(jointCreatedIds) != ${design.joints.length}: raise RuntimeError(${py("Fusion assembly joint count mismatch")})`, `print('joint_count=' + str(len(jointCreatedIds)))`, `print('joint_ids=' + ','.join(jointCreatedIds))`);
+  return { script: lines.join("\n"), unsupported };
+}
+
 export function extractFusionToolText(result: unknown): string {
   if (typeof result === "string") return result;
   if (result && typeof result === "object" && !Array.isArray(result)) {
@@ -260,44 +334,27 @@ export function compileRobotDesignToFusionScript(input: unknown): { design: Robo
   const designHash = robotDesignHash(design);
   const unsupported: string[] = [];
   const parts: string[] = [];
-  for (const part of design.parts) {
-    const result = compilePart(part);
-    parts.push(result.script);
-    unsupported.push(...result.unsupported);
-  }
+  for (const part of design.parts) { const result = compilePart(part); parts.push(result.script); unsupported.push(...result.unsupported); }
+  const assembly = compileAssemblyJoints(design);
+  unsupported.push(...assembly.unsupported);
   const expectedCuts = design.parts.reduce((total, part) => {
     const byId = new Map(part.geometry.operations.map(operation => [operation.id, operation]));
     return total + part.geometry.operations.filter(operation => operation.op === "circle" && operation.inputs.length > 0 && byId.get(operation.inputs[0])?.op === "extrude").length;
   }, 0);
   const script = [
-    "import adsk.core, adsk.fusion",
-    "def run(_context: str):",
-    "    app = adsk.core.Application.get()",
-    "    if not app: raise RuntimeError('Fusion application unavailable')",
-    "    doc = app.documents.add(adsk.core.DocumentTypes.FusionDesignDocumentType)",
-    "    design = adsk.fusion.Design.cast(app.activeProduct)",
-    "    if not design: raise RuntimeError('New Fusion Design could not be activated')",
-    "    root = design.rootComponent",
-    `    design.attributes.add('AI_FACTORY', 'robot_design_hash', ${py(designHash)})`,
-    `    doc.attributes.add('AI_FACTORY', 'robot_design_hash', ${py(designHash)})`,
-    "    refs = {}",
-    "    createdBodies = 0",
-    "    holeCount = 0",
+    "import adsk.core, adsk.fusion", "def run(_context: str):", "    app = adsk.core.Application.get()", "    if not app: raise RuntimeError('Fusion application unavailable')", "    doc = app.documents.add(adsk.core.DocumentTypes.FusionDesignDocumentType)", "    design = adsk.fusion.Design.cast(app.activeProduct)", "    if not design: raise RuntimeError('New Fusion Design could not be activated')", "    root = design.rootComponent",
+    `    design.attributes.add('AI_FACTORY', 'robot_design_hash', ${py(designHash)})`, `    doc.attributes.add('AI_FACTORY', 'robot_design_hash', ${py(designHash)})`,
+    "    refs = {}", "    createdBodies = 0", "    holeCount = 0",
     ...parts.flatMap(part => part.split("\n").map(line => `    ${line}`)),
-    `    actualParts = root.occurrences.count`,
-    `    print('AI_FACTORY_ROBOT_CAD_RESULT')`,
-    `    print('design_hash=' + ${py(designHash)})`,
-    `    print('document=' + app.activeDocument.name)`,
-    `    print('parts=' + str(actualParts))`,
-    `    print('bodies=' + str(createdBodies))`,
-    `    print('cuts=' + str(holeCount))`,
+    ...(assembly.script ? assembly.script.split("\n").map(line => `    ${line}`) : []),
+    `    actualParts = root.occurrences.count`, `    actualJoints = root.joints.count`, `    print('AI_FACTORY_ROBOT_CAD_RESULT')`, `    print('design_hash=' + ${py(designHash)})`, `    print('document=' + app.activeDocument.name)`, `    print('parts=' + str(actualParts))`, `    print('bodies=' + str(createdBodies))`, `    print('cuts=' + str(holeCount))`, `    print('joints=' + str(actualJoints))`,
   ].join("\n");
   return { design, designHash, script, unsupportedOperations: unsupported };
 }
 
 export async function compileRobotDesignToFusion(input: unknown): Promise<RobotCadCompileResult> {
   const compiled = compileRobotDesignToFusionScript(input);
-  if (compiled.unsupportedOperations.length) return { schema: "ai-factory.robot-cad-compile/v1", designHash: compiled.designHash, success: false, createdParts: [], unsupportedOperations: compiled.unsupportedOperations, error: "The model-authored design contains geometry operations not yet implemented by the Fusion compiler." };
+  if (compiled.unsupportedOperations.length) return { schema: "ai-factory.robot-cad-compile/v1", designHash: compiled.designHash, success: false, createdParts: [], unsupportedOperations: compiled.unsupportedOperations, error: "The model-authored design contains geometry or assembly features not supported by the Fusion compiler." };
   const expectedCuts = compiled.design.parts.reduce((total, part) => {
     const byId = new Map(part.geometry.operations.map(operation => [operation.id, operation]));
     return total + part.geometry.operations.filter(operation => operation.op === "circle" && operation.inputs.length > 0 && byId.get(operation.inputs[0])?.op === "extrude").length;
@@ -311,10 +368,12 @@ export async function compileRobotDesignToFusion(input: unknown): Promise<RobotC
     const parts = Number(text.match(/parts=(\d+)/)?.[1] ?? 0);
     const bodies = Number(text.match(/bodies=(\d+)/)?.[1] ?? 0);
     const cuts = Number(text.match(/cuts=(\d+)/)?.[1] ?? 0);
+    const joints = Number(text.match(/joints=(\d+)/)?.[1] ?? 0);
     if (actualHash !== compiled.designHash) return { schema: "ai-factory.robot-cad-compile/v1", designHash: compiled.designHash, success: false, createdParts: [], unsupportedOperations: [], error: `Fusion did not return the expected design hash. Raw result: ${text.slice(0,1000)}` };
     if (parts !== compiled.design.parts.length) return { schema: "ai-factory.robot-cad-compile/v1", designHash: compiled.designHash, success: false, createdParts: [], unsupportedOperations: [], error: `Fusion verified ${parts} parts; expected ${compiled.design.parts.length}.` };
     if (bodies < compiled.design.parts.length) return { schema: "ai-factory.robot-cad-compile/v1", designHash: compiled.designHash, success: false, createdParts: [], unsupportedOperations: [], error: `Fusion verified ${bodies} solid bodies; expected at least ${compiled.design.parts.length}.` };
     if (cuts !== expectedCuts) return { schema: "ai-factory.robot-cad-compile/v1", designHash: compiled.designHash, success: false, createdParts: [], unsupportedOperations: [], error: `Fusion verified ${cuts} hole cuts; expected ${expectedCuts}.` };
+    if (joints !== compiled.design.joints.length) return { schema: "ai-factory.robot-cad-compile/v1", designHash: compiled.designHash, success: false, createdParts: [], unsupportedOperations: [], error: `Fusion verified ${joints} assembly joints; expected ${compiled.design.joints.length}.` };
     return { schema: "ai-factory.robot-cad-compile/v1", designHash: compiled.designHash, success: true, document, createdParts: compiled.design.parts.map(part => part.id), unsupportedOperations: [] };
   } catch (error) {
     return { schema: "ai-factory.robot-cad-compile/v1", designHash: compiled.designHash, success: false, createdParts: [], unsupportedOperations: [], error: error instanceof Error ? error.message : String(error) };
