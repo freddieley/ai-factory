@@ -19,19 +19,24 @@ const ROBOT_SYSTEM = `You are the mechanical design model for AI Factory. You au
 Return ONLY one complete JSON object matching ai-factory.robot-design/v1. Never return markdown, prose, a JSON string, or a tool call.
 
 Top-level fields MUST be: schema, name, mission, requirements, parts, joints, designRationale, unresolvedQuestions.
-Each part MUST contain id, name, material, manufacturingProcess, geometry. Geometry MUST contain schema ai-factory.robot-geometry/v1, units: "mm", operations, outputOperationId. Every operation MUST contain id, op, inputs, parameters.
+Each part MUST contain id, name, material, manufacturingProcess, geometry. Geometry MUST contain schema ai-factory.robot-geometry/v1, units: "mm", operations, outputOperationId. Every operation MUST contain id, op, inputs, parameters. Operation inputs are ALWAYS operation ID strings; never inline nested operation objects.
 
-The geometry graph is the model's design representation. The model must interpret the user's requirements, dimensions, constraints, relationships, manufacturing intent, and placement itself and author the appropriate graph. Do not use task-specific templates, benchmark examples, memorized dimensions, or precomputed placements.
+The geometry graph is the model's design representation. Interpret the user's requirements, dimensions, constraints, relationships, manufacturing intent, and placement yourself and author the appropriate graph. Do not use task-specific templates, benchmark examples, memorized dimensions, or precomputed placements.
 
-The deterministic factory supports only the operation vocabulary exposed by the schema. Use those operations according to their semantic meaning and connect them through operation IDs. Inputs must reference operations in the graph. Do not invent operation types or compiler behavior. Keep the graph complete, acyclic, internally consistent, and sufficient to represent the requested design.
+Executable CAD operations in the current factory are: sketch, rectangle, circle, extrude, and transform. Other enum values may exist for schema compatibility, but they are not executable by the current Fusion compiler and must not be used when producing a design intended for execution.
 
-Use a consistent coordinate system. Establish an origin and orientation that make the design easy to reason about, then derive all dimensions and placements from the user's requirements. Do not invent a second coordinate frame midway through a design. A transform is a relative placement of the geometry it receives; account for the accumulated placement when reasoning about subsequent features.
+Canonical executable graph semantics:
+- sketch: create a planar sketch. Parameters may include plane: "XY", "XZ", or "YZ". Keep inputs empty.
+- rectangle: add a closed rectangular profile to the referenced sketch. It MUST have one input containing the sketch operation ID. Use widthMm, heightMm, and optionally centerX, centerY, rotationDeg. Coordinates are in the part's local millimetre frame.
+- circle: either add a circular profile to a referenced sketch (input is the sketch operation ID), OR request a subtractive circular cut from an existing extrude (input is the extrude operation ID). For a cut, use radiusMm or radius plus centerX and centerY. Do not invent cylinder or hole operation types.
+- extrude: turn a referenced sketch/profile into a new solid body. It MUST have an input that ultimately references a sketch/profile and MUST use distanceMm (distance is accepted as an alias). Use a positive thickness/depth appropriate to the requested part.
+- transform: place or rotate existing geometry. It MUST have exactly one input containing an operation ID and may use translateXmm/translateYmm or translateX/translateY plus rotationDeg/rotateDeg. A transform is a placement operation, not a new solid.
 
-Sketches represent profiles on a plane. Rectangles, circles, and other supported profile operations should be used to represent the requested cross-sections. An extrusion turns an appropriate profile into a solid. A circular feature applied to an existing solid may represent a subtractive cut when that is what the requested design semantics require. Do not assume that every circular feature is a new solid body.
+For a simple solid made from a planar profile, prefer the explicit graph sketch -> rectangle/circle -> extrude. For subtractive holes in an existing extrusion, use the generic circle-on-extrude cut semantics. For repeated components, either author different profile centres or use distinct transform placements; identical geometry at the same placement is invalid.
 
-Do not reference CAD implementation details that the model cannot infer from the schema. In particular, do not assume sketch-only objects or BRep bodies expose sketch-specific collections. The factory owns CAD API mechanics.
+Use a consistent coordinate system. Establish one origin and orientation for the part/assembly and derive dimensions and placements from the user's requirements. Do not silently switch frames. A transform is relative placement of the geometry it receives; account for any accumulated placement when composing later features.
 
-When repeated components are required, make every instance physically distinct through its authored geometry and/or placement. Names alone do not create distinct physical parts.
+Keep the graph complete, acyclic, internally consistent, and fully connected to outputOperationId. Do not embed a complete geometry graph inside operation parameters and do not reference an operation before it exists conceptually in the graph. Do not rely on implementation-specific Fusion object collections; the deterministic factory owns CAD API mechanics.
 
 DesignRationale and unresolvedQuestions are arrays of strings. Joints, when needed, use {id,parentPartId,childPartId,type}, where type is fixed, revolute, prismatic, spherical, or planar. Use joints: [] when no assembly relationship is required.
 
@@ -79,8 +84,9 @@ function normalizeRobotDesignModelOutput(value: unknown): unknown {
   return { ...source, parts };
 }
 
-function buildRetryPrompt(originalPrompt: string, error: string, attempt: number): string {
-  return `Build request:\n${originalPrompt}\n\nThis is correction attempt ${attempt}. The deterministic factory rejected the prior submission. Re-evaluate the design from the user's requirements and fix the evidenced failure. Do not assume the prior design was conceptually correct merely because it was close to compiling.\n\nREJECTION EVIDENCE:\n${error}\n\nReturn a materially corrected design as exactly one complete JSON object matching the same schema. Preserve valid decisions from the prior attempt only when they remain justified by the request and the rejection evidence. Do not use benchmark-specific examples, hardcoded dimensions, hardcoded placements, templates, or task-specific workarounds.`;
+function buildRetryPrompt(originalPrompt: string, error: string, attempt: number, previousDesign: unknown): string {
+  const prior = previousDesign === null ? "No prior design was accepted." : `Prior rejected design for reference:\n${compactEvidence(previousDesign, 6_000)}`;
+  return `Build request:\n${originalPrompt}\n\nThis is correction attempt ${attempt}. The deterministic factory rejected the prior submission. Re-evaluate the design from the user's requirements and fix the exact evidenced failure. Do not assume the prior design was conceptually correct merely because it was close to compiling.\n\n${prior}\n\nREJECTION EVIDENCE:\n${error}\n\nMandatory correction rules: use only executable operations sketch, rectangle, circle, extrude, and transform; keep every operation input as an operation ID string; never embed an operation object inside inputs or parameters; use widthMm/heightMm for rectangles, radiusMm for circles, distanceMm for extrusions, and translateXmm/translateYmm plus rotationDeg for transforms; ensure every repeated part has a genuinely distinct authored placement; keep the operation graph acyclic and connected to outputOperationId.\n\nReturn exactly one complete JSON object matching the same schema. Do not use benchmark-specific examples, hardcoded dimensions, hardcoded placements, templates, or task-specific workarounds.`;
 }
 
 async function requestRobotModel(client: any, model: string, temperature: number, messages: any[], signal: AbortSignal): Promise<any> {
@@ -122,7 +128,7 @@ export async function runRobotAgent({ projectId, prompt, cycleId, runId, client,
           ]
         : [
             { role: "system", content: ROBOT_SYSTEM },
-            { role: "user", content: buildRetryPrompt(prompt, previousError, attempt) },
+            { role: "user", content: buildRetryPrompt(prompt, previousError, attempt, previousDesign) },
           ];
 
       const modelStarted = Date.now();
