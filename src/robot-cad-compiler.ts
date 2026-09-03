@@ -1,4 +1,5 @@
 import { robotDesignHash, validateRobotDesign, RobotDesign, RobotJoint } from "./robot-design.js";
+import { verifyRobotDesignSemantics } from "./robot-semantic-verifier.js";
 import { config } from "./config.js";
 import { fusion } from "./fusion.js";
 import { withTimeout } from "./execution.js";
@@ -43,6 +44,11 @@ function circleLine(sketchRef: string, parameters: Record<string, unknown>): str
   return `${sketchRef}.sketchCurves.sketchCircles.addByCenterRadius(${point(x, y)}, ${r})`;
 }
 
+function planeExpression(planeValue: unknown): string {
+  const plane = String(planeValue ?? "XY").toUpperCase();
+  return plane === "YZ" ? "component.yZConstructionPlane" : plane === "XZ" ? "component.xZConstructionPlane" : "component.xYConstructionPlane";
+}
+
 type TransformSpec = { rotationDeg: number; tx: number; ty: number; tz: number };
 
 function transformSpec(parameters: Record<string, unknown>): TransformSpec | null {
@@ -68,10 +74,7 @@ function sourcePlaneExpression(operationById: Map<string, RobotDesign["parts"][n
   const visited = new Set<string>();
   while (current && !visited.has(current.id)) {
     visited.add(current.id);
-    if (current.op === "sketch") {
-      const plane = String(current.parameters.plane ?? "XY").toUpperCase();
-      return plane === "YZ" ? "component.yZConstructionPlane" : plane === "XZ" ? "component.xZConstructionPlane" : "component.xYConstructionPlane";
-    }
+    if (current.op === "sketch") return planeExpression(current.parameters.plane);
     const nextId = current.inputs[0];
     current = nextId ? operationById.get(nextId) : undefined;
   }
@@ -97,9 +100,7 @@ function compilePart(part: RobotDesign["parts"][number]): { script: string; unsu
     const ref = `refs[${py(op.id)}]`;
     switch (op.op) {
       case "sketch": {
-        const plane = String(op.parameters.plane ?? "XY").toUpperCase();
-        const planeExpr = plane === "YZ" ? "component.yZConstructionPlane" : plane === "XZ" ? "component.xZConstructionPlane" : "component.xYConstructionPlane";
-        lines.push(`${ref} = sketches.add(${planeExpr})`);
+        lines.push(`${ref} = sketches.add(${planeExpression(op.parameters.plane)})`);
         const nested = Array.isArray(op.parameters.operations) ? op.parameters.operations : [];
         for (const nestedOperation of nested) {
           if (!nestedOperation || typeof nestedOperation !== "object" || Array.isArray(nestedOperation)) {
@@ -157,9 +158,10 @@ function compilePart(part: RobotDesign["parts"][number]): { script: string; unsu
             unsupported.push(`${part.id}:${op.id}:circle-input-or-radius`);
             break;
           }
-          const planeExpr = sourcePlaneExpression(operationById, sourceId);
-          const sourceDistance = num(sourceOp.parameters.distanceMm ?? sourceOp.parameters.distance) / 10;
-          const cutDistance = sourceDistance > 0 ? sourceDistance + 0.1 : 0.1;
+          const cutPlane = String(op.parameters.plane ?? "").toUpperCase();
+          const planeExpr = cutPlane === "XY" ? "component.xYConstructionPlane" : cutPlane === "XZ" ? "component.xZConstructionPlane" : "component.yZConstructionPlane";
+          const throughAll = op.parameters.throughAll !== false;
+          const extentMm = num(op.parameters.extentMm);
           lines.push(
             `holeSketch = sketches.add(${planeExpr})`,
             circle,
@@ -167,7 +169,16 @@ function compilePart(part: RobotDesign["parts"][number]): { script: string; unsu
             `if holeProfiles.count < 1: raise RuntimeError(${py(`Hole sketch for ${part.id}:${op.id} produced no closed profile`)})`,
             `holeProfile = holeProfiles.item(0)`,
             `cutInput = features.extrudeFeatures.createInput(holeProfile, adsk.fusion.FeatureOperations.CutFeatureOperation)`,
-            `cutInput.setDistanceExtent(False, adsk.core.ValueInput.createByReal(${cutDistance}))`,
+            ...(throughAll
+              ? [
+                  `throughAllOne = adsk.fusion.ThroughAllExtentDefinition.create()`,
+                  `throughAllTwo = adsk.fusion.ThroughAllExtentDefinition.create()`,
+                  `if not cutInput.setTwoSidesExtent(throughAllOne, throughAllTwo): raise RuntimeError(${py(`Through-all hole cut configuration failed for ${part.id}:${op.id}`)})`,
+                ]
+              : [
+                  `cutExtent = adsk.fusion.DistanceExtentDefinition.create(adsk.core.ValueInput.createByReal(${Math.max(extentMm, 0.1) / 10}))`,
+                  `if not cutInput.setSymmetricExtent(cutExtent.distance if hasattr(cutExtent, 'distance') else adsk.core.ValueInput.createByReal(${Math.max(extentMm, 0.1) / 10}), True): raise RuntimeError(${py(`Symmetric hole cut configuration failed for ${part.id}:${op.id}`)})`,
+                ]),
             `cutExtrusion = features.extrudeFeatures.add(cutInput)`,
             `if not cutExtrusion: raise RuntimeError(${py(`Hole cut failed for ${part.id}:${op.id}`)})`,
             `${ref} = refs[${py(sourceId)}]`,
@@ -371,6 +382,8 @@ async function cleanupFailedFusionDocument(designHash: string): Promise<void> {
 
 export function compileRobotDesignToFusionScript(input: unknown): { design: RobotDesign; designHash: string; script: string; unsupportedOperations: string[] } {
   const design = validateRobotDesign(input);
+  const semantic = verifyRobotDesignSemantics(design);
+  if (!semantic.success) throw new Error(`Robot semantic verification failed: ${semantic.errors.join(" ")}`);
   const designHash = robotDesignHash(design);
   const unsupported: string[] = [];
   const parts: string[] = [];
@@ -387,13 +400,18 @@ export function compileRobotDesignToFusionScript(input: unknown): { design: Robo
     "    refs = {}", "    createdBodies = 0", "    holeCount = 0",
     ...parts.flatMap(part => part.split("\n").map(line => `    ${line}`)),
     ...(assembly.script ? assembly.script.split("\n").map(line => `    ${line}`) : []),
-    `    actualParts = root.occurrences.count`, `    actualJoints = root.joints.count`, `    print('AI_FACTORY_ROBOT_CAD_RESULT')`, `    print('design_hash=' + ${py(designHash)})`, `    print('document=' + app.activeDocument.name)`, `    print('parts=' + str(actualParts))`, `    print('bodies=' + str(createdBodies))`, `    print('cuts=' + str(holeCount))`, `    print('joints=' + str(actualJoints))`,
+    `    actualParts = root.occurrences.count`, `    actualJoints = root.joints.count`, `    print('AI_FACTORY_ROBOT_CAD_RESULT')`, `    print('design_hash=' + ${py(designHash)})`, `    print('document=' + app.activeDocument.name)`, `    print('parts=' + str(actualParts))`, `    print('bodies=' + str(createdBodies))`, `    print('cuts=' + str(holeCount))`, `    print('joints=' + str(actualJoints))`, `    print('semantic_warnings=' + ${py(semantic.warnings.join(" | "))})`,
   ].join("\n");
   return { design, designHash, script, unsupportedOperations: unsupported };
 }
 
 export async function compileRobotDesignToFusion(input: unknown): Promise<RobotCadCompileResult> {
-  const compiled = compileRobotDesignToFusionScript(input);
+  let compiled: ReturnType<typeof compileRobotDesignToFusionScript>;
+  try {
+    compiled = compileRobotDesignToFusionScript(input);
+  } catch (error) {
+    return { schema: "ai-factory.robot-cad-compile/v1", designHash: "", success: false, createdParts: [], unsupportedOperations: [], error: error instanceof Error ? error.message : String(error) };
+  }
   if (compiled.unsupportedOperations.length) return { schema: "ai-factory.robot-cad-compile/v1", designHash: compiled.designHash, success: false, createdParts: [], unsupportedOperations: compiled.unsupportedOperations, error: "The model-authored design contains geometry or assembly features not supported by the Fusion compiler." };
   const expectedCuts = compiled.design.parts.reduce((total, part) => {
     const byId = new Map(part.geometry.operations.map(operation => [operation.id, operation]));
