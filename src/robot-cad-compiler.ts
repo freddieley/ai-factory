@@ -176,8 +176,7 @@ function compilePart(part: RobotDesign["parts"][number]): { script: string; unsu
                   `if not cutInput.setTwoSidesExtent(throughAllOne, throughAllTwo): raise RuntimeError(${py(`Through-all hole cut configuration failed for ${part.id}:${op.id}`)})`,
                 ]
               : [
-                  `cutExtent = adsk.fusion.DistanceExtentDefinition.create(adsk.core.ValueInput.createByReal(${Math.max(extentMm, 0.1) / 10}))`,
-                  `if not cutInput.setSymmetricExtent(cutExtent.distance if hasattr(cutExtent, 'distance') else adsk.core.ValueInput.createByReal(${Math.max(extentMm, 0.1) / 10}), True): raise RuntimeError(${py(`Symmetric hole cut configuration failed for ${part.id}:${op.id}`)})`,
+                  `if not cutInput.setSymmetricExtent(adsk.core.ValueInput.createByReal(${Math.max(extentMm, 0.1) / 10}), True): raise RuntimeError(${py(`Symmetric hole cut configuration failed for ${part.id}:${op.id}`)})`,
                 ]),
             `cutExtrusion = features.extrudeFeatures.add(cutInput)`,
             `if not cutExtrusion: raise RuntimeError(${py(`Hole cut failed for ${part.id}:${op.id}`)})`,
