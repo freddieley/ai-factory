@@ -193,12 +193,35 @@ function buildRetryPrompt(originalPrompt: string, error: string, attempt: number
   return `Build request:\n${originalPrompt}\n\nThis is correction attempt ${attempt}. The deterministic factory rejected the prior submission. Re-evaluate the design from the user's requirements and fix the exact evidenced failure. Do not assume the prior design was conceptually correct merely because it was close to compiling.\n\n${prior}\n\nREJECTION EVIDENCE:\n${error}\n\nMandatory correction rules: use only executable operations sketch, rectangle, circle, extrude, and transform; keep every operation input as an operation ID string; never embed an operation object inside inputs or parameters; use widthMm/heightMm for rectangles, radiusMm for circles, distanceMm for extrusions, and translateXmm/translateX, translateYmm/translateY, translateZmm/translateZ plus rotationDeg for transforms; for every circular cut from an extrude explicitly choose plane XY/XZ/YZ from the required physical axis and use throughAll=true for a through-hole or a positive extentMm for a bounded cut; ensure every repeated part has a genuinely distinct authored placement; keep the operation graph acyclic and connected to outputOperationId.\n\nReturn exactly one complete JSON object matching the same schema. Do not use benchmark-specific examples, hardcoded dimensions, hardcoded placements, templates, or task-specific workarounds.`;
 }
 
+function modelResponseDiagnostics(response: any, message: any): Record<string, unknown> {
+  const choice = response?.choices?.[0];
+  const reasoning = typeof message?.reasoning === "string"
+    ? message.reasoning
+    : typeof message?.reasoning_content === "string"
+      ? message.reasoning_content
+      : "";
+  const usage = response?.usage ?? {};
+  return {
+    finishReason: choice?.finish_reason ?? null,
+    completionTokens: usage?.completion_tokens ?? null,
+    promptTokens: usage?.prompt_tokens ?? null,
+    totalTokens: usage?.total_tokens ?? null,
+    reasoningPresent: reasoning.length > 0,
+    reasoningLength: reasoning.length,
+    messageFields: message && typeof message === "object" ? Object.keys(message) : [],
+  };
+}
+
+function buildEmptyResponseRecoveryPrompt(originalPrompt: string, diagnostics: Record<string, unknown>): string {
+  return `Build request:\n${originalPrompt}\n\nThe previous model generation returned no usable message content. Generate the complete robot-design/v1 JSON object now. Do not explain your reasoning, do not return markdown, and do not return an empty response. Keep the geometry model-authored and obey the existing CAD operation, plane, axis, placement, and verification rules. Generation diagnostics from the previous attempt: ${JSON.stringify(diagnostics)}.`;
+}
+
 async function requestRobotModel(client: any, model: string, temperature: number, messages: any[], signal: AbortSignal): Promise<any> {
   try {
     return await client.chat.completions.create({
       model,
       temperature,
-      max_tokens: 7000,
+      max_tokens: 14000,
       messages,
       response_format: { type: "json_object" },
     }, { signal });
@@ -208,7 +231,7 @@ async function requestRobotModel(client: any, model: string, temperature: number
     return await client.chat.completions.create({
       model,
       temperature,
-      max_tokens: 7000,
+      max_tokens: 14000,
       messages,
     }, { signal });
   }
@@ -225,6 +248,7 @@ export async function runRobotAgent({ projectId, prompt, cycleId, runId, client,
     let previousError = "";
 
     for (let attempt = 1; attempt <= 3; attempt++) {
+      const emptyResponseRecovery = attempt > 1 && previousDesign === null && previousError.includes("Model returned an empty design response");
       const modelMessages = attempt === 1
         ? [
             { role: "system", content: ROBOT_SYSTEM },
@@ -232,7 +256,9 @@ export async function runRobotAgent({ projectId, prompt, cycleId, runId, client,
           ]
         : [
             { role: "system", content: ROBOT_SYSTEM },
-            { role: "user", content: buildRetryPrompt(prompt, previousError, attempt, previousDesign) },
+            { role: "user", content: emptyResponseRecovery
+              ? buildEmptyResponseRecoveryPrompt(prompt, { previousError })
+              : buildRetryPrompt(prompt, previousError, attempt, previousDesign) },
           ];
 
       const modelStarted = Date.now();
@@ -252,9 +278,10 @@ export async function runRobotAgent({ projectId, prompt, cycleId, runId, client,
 
       const message = response?.choices?.[0]?.message;
       const content = typeof message?.content === "string" ? message.content.trim() : "";
-      addEvent(runId, "model.message", { step: attempt, elapsedMs: Date.now() - modelStarted, content: content || null, toolCalls: [], mode: "robot-json-design" });
+      const diagnostics = modelResponseDiagnostics(response, message);
+      addEvent(runId, "model.message", { step: attempt, elapsedMs: Date.now() - modelStarted, content: content || null, toolCalls: [], mode: "robot-json-design", ...diagnostics });
       if (!content) {
-        previousError = "Model returned an empty design response.";
+        previousError = `Model returned an empty design response. finish_reason=${String(diagnostics.finishReason ?? "unknown")}; completion_tokens=${String(diagnostics.completionTokens ?? "unknown")}; reasoning_present=${String(diagnostics.reasoningPresent)}`;
         continue;
       }
 
