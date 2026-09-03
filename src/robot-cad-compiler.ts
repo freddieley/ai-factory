@@ -45,9 +45,11 @@ function circleLine(sketchRef: string, parameters: Record<string, unknown>): str
 
 function compilePart(part: RobotDesign["parts"][number]): { script: string; unsupported: string[] } {
   const unsupported: string[] = [];
+  const operationById = new Map(part.geometry.operations.map(operation => [operation.id, operation]));
   const lines: string[] = [
     `# AI Factory part ${py(part.id)}`,
-    `component = root.occurrences.addNewComponent(adsk.core.Matrix3D.create()).component`,
+    `occurrence = root.occurrences.addNewComponent(adsk.core.Matrix3D.create())`,
+    `component = occurrence.component`,
     `component.name = ${py(part.name)}`,
     `sketches = component.sketches`,
     `features = component.features`,
@@ -108,7 +110,7 @@ function compilePart(part: RobotDesign["parts"][number]): { script: string; unsu
         break;
       }
       case "extrude": {
-        const profileInput = op.inputs.length ? op.inputs[0] : "";
+        const profileInput = op.inputs.find(input => operationById.get(input)?.op !== "circle") ?? op.inputs[0] ?? "";
         const sketch = profileInput ? `refs[${py(profileInput)}]` : "None";
         const distance = num(op.parameters.distanceMm) / 10;
         if (sketch === "None" || !(distance > 0)) { unsupported.push(`${part.id}:${op.id}:extrude-input-or-distance`); break; }
@@ -116,22 +118,22 @@ function compilePart(part: RobotDesign["parts"][number]): { script: string; unsu
           `profiles = ${sketch}.profiles`,
           `if profiles.count < 1: raise RuntimeError(${py(`Sketch for ${part.id}:${op.id} produced no closed profiles`)})`,
           `extrusionsBefore = features.extrudeFeatures.count`,
-          `for profileIndex in range(profiles.count):`,
-          `    profile = profiles.item(profileIndex)`,
-          `    input = features.extrudeFeatures.createInput(profile, adsk.fusion.FeatureOperations.NewBodyFeatureOperation)`,
-          `    input.setDistanceExtent(False, adsk.core.ValueInput.createByReal(${distance}))`,
-          `    extrusion = features.extrudeFeatures.add(input)`,
-          `    if not extrusion: raise RuntimeError(${py(`Extrusion failed for ${part.id}:${op.id}`)})`,
-          `    body = extrusion.bodies.item(0)`,
-          `    solidByInput[${py(profileInput)}] = body`,
-          `    solidByInput[${py(op.id)}] = body`,
-          `    pending = pendingTransforms.get(${py(profileInput)})`,
-          `    if pending:`,
-          `        rotationDeg, tx, ty = pending`,
-          `        matrix = adsk.core.Matrix3D.create()`,
-          `        matrix.setToRotation(rotationDeg * 3.141592653589793 / 180.0, adsk.core.Vector3D.create(0,0,1), adsk.core.Point3D.create(0,0,0))`,
-          `        matrix.translation = adsk.core.Vector3D.create(tx,ty,0)`,
-          `        if not body.transformBy(matrix): raise RuntimeError(${py(`Transform failed for ${part.id}:${op.id}`)})`,
+          `profile = profiles.item(0)`,
+          `input = features.extrudeFeatures.createInput(profile, adsk.fusion.FeatureOperations.NewBodyFeatureOperation)`,
+          `input.setDistanceExtent(False, adsk.core.ValueInput.createByReal(${distance}))`,
+          `extrusion = features.extrudeFeatures.add(input)`,
+          `if not extrusion: raise RuntimeError(${py(`Extrusion failed for ${part.id}:${op.id}`)})`,
+          `if extrusion.bodies.count < 1: raise RuntimeError(${py(`Extrusion produced no body for ${part.id}:${op.id}`)})`,
+          `body = extrusion.bodies.item(0)`,
+          `solidByInput[${py(profileInput)}] = body`,
+          `solidByInput[${py(op.id)}] = body`,
+          `pending = pendingTransforms.get(${py(profileInput)})`,
+          `if pending:`,
+          `    rotationDeg, tx, ty = pending`,
+          `    matrix = adsk.core.Matrix3D.create()`,
+          `    matrix.setToRotation(rotationDeg * 3.141592653589793 / 180.0, adsk.core.Vector3D.create(0,0,1), adsk.core.Point3D.create(0,0,0))`,
+          `    matrix.translation = adsk.core.Vector3D.create(tx,ty,0)`,
+          `    occurrence.transform2 = matrix`,
         );
         break;
       }
@@ -143,14 +145,11 @@ function compilePart(part: RobotDesign["parts"][number]): { script: string; unsu
         const ty = num(op.parameters.translateYmm ?? op.parameters.translateY) / 10;
         if (source === "None" || !Number.isFinite(rotationDeg) || !Number.isFinite(tx) || !Number.isFinite(ty)) { unsupported.push(`${part.id}:${op.id}:transform-input-or-parameters`); break; }
         lines.push(
-          `if ${py(sourceId)} in solidByInput:`,
-          `    body = solidByInput[${py(sourceId)}]`,
-          `    matrix = adsk.core.Matrix3D.create()`,
-          `    matrix.setToRotation(${rotationDeg} * 3.141592653589793 / 180.0, adsk.core.Vector3D.create(0,0,1), adsk.core.Point3D.create(0,0,0))`,
-          `    matrix.translation = adsk.core.Vector3D.create(${tx},${ty},0)`,
-          `    if not body.transformBy(matrix): raise RuntimeError(${py(`Transform failed for ${part.id}:${op.id}`)})`,
-          `else:`,
-          `    pendingTransforms[${py(sourceId)}] = (${rotationDeg}, ${tx}, ${ty})`,
+          `matrix = adsk.core.Matrix3D.create()`,
+          `matrix.setToRotation(${rotationDeg} * 3.141592653589793 / 180.0, adsk.core.Vector3D.create(0,0,1), adsk.core.Point3D.create(0,0,0))`,
+          `matrix.translation = adsk.core.Vector3D.create(${tx},${ty},0)`,
+          `occurrence.transform2 = matrix`,
+          `pendingTransforms[${py(sourceId)}] = (${rotationDeg}, ${tx}, ${ty})`,
         );
         lines.push(`${ref} = ${source}`);
         break;
