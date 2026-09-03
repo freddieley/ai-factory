@@ -43,21 +43,22 @@ function circleLine(sketchRef: string, parameters: Record<string, unknown>): str
   return `${sketchRef}.sketchCurves.sketchCircles.addByCenterRadius(${point(x, y)}, ${r})`;
 }
 
-type TransformSpec = { rotationDeg: number; tx: number; ty: number };
+type TransformSpec = { rotationDeg: number; tx: number; ty: number; tz: number };
 
 function transformSpec(parameters: Record<string, unknown>): TransformSpec | null {
   const rotationDeg = num(parameters.rotationDeg ?? parameters.rotateDeg);
   const tx = num(parameters.translateXmm ?? parameters.translateX) / 10;
   const ty = num(parameters.translateYmm ?? parameters.translateY) / 10;
-  if (!Number.isFinite(rotationDeg) || !Number.isFinite(tx) || !Number.isFinite(ty)) return null;
-  return { rotationDeg, tx, ty };
+  const tz = num(parameters.translateZmm ?? parameters.translateZ) / 10;
+  if (!Number.isFinite(rotationDeg) || !Number.isFinite(tx) || !Number.isFinite(ty) || !Number.isFinite(tz)) return null;
+  return { rotationDeg, tx, ty, tz };
 }
 
 function transformLines(spec: TransformSpec): string[] {
   return [
     `matrix = adsk.core.Matrix3D.create()`,
     `matrix.setToRotation(${spec.rotationDeg} * 3.141592653589793 / 180.0, adsk.core.Vector3D.create(0,0,1), adsk.core.Point3D.create(0,0,0))`,
-    `matrix.translation = adsk.core.Vector3D.create(${spec.tx},${spec.ty},0)`,
+    `matrix.translation = adsk.core.Vector3D.create(${spec.tx},${spec.ty},${spec.tz})`,
     `occurrence.transform2 = matrix`,
   ];
 }
@@ -194,10 +195,10 @@ function compilePart(part: RobotDesign["parts"][number]): { script: string; unsu
           `refs[${py(op.id)}] = body`,
           `pending = pendingTransforms.get(${py(op.id)})`,
           `if pending:`,
-          `    rotationDeg, tx, ty = pending`,
+          `    rotationDeg, tx, ty, tz = pending`,
           `    matrix = adsk.core.Matrix3D.create()`,
           `    matrix.setToRotation(rotationDeg * 3.141592653589793 / 180.0, adsk.core.Vector3D.create(0,0,1), adsk.core.Point3D.create(0,0,0))`,
-          `    matrix.translation = adsk.core.Vector3D.create(tx,ty,0)`,
+          `    matrix.translation = adsk.core.Vector3D.create(tx,ty,tz)`,
           `    occurrence.transform2 = matrix`,
           `    pendingTransforms.pop(${py(op.id)}, None)`,
         );
@@ -219,7 +220,7 @@ function compilePart(part: RobotDesign["parts"][number]): { script: string; unsu
         if (sourceOp?.op === "extrude") {
           lines.push(...transformLines(spec), `${ref} = ${sourceRef}`);
         } else {
-          lines.push(`pendingTransforms[${py(sourceId)}] = (${spec.rotationDeg}, ${spec.tx}, ${spec.ty})`, `${ref} = ${sourceRef}`);
+          lines.push(`pendingTransforms[${py(sourceId)}] = (${spec.rotationDeg}, ${spec.tx}, ${spec.ty}, ${spec.tz})`, `${ref} = ${sourceRef}`);
         }
         break;
       }
