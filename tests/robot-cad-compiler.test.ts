@@ -59,15 +59,30 @@ describe("robot CAD compiler", () => {
       { id: "sk", op: "sketch", inputs: [], parameters: { plane: "XY" } },
       { id: "plate", op: "rectangle", inputs: ["sk"], parameters: { widthMm: 100, heightMm: 60, centerX: 0, centerY: 0 } },
       { id: "solid", op: "extrude", inputs: ["plate"], parameters: { distanceMm: 5 } },
-      { id: "hole", op: "circle", inputs: ["solid"], parameters: { radiusMm: 3, centerX: -40, centerY: -20 } },
+      { id: "hole", op: "circle", inputs: ["solid"], parameters: { plane: "XY", throughAll: true, radiusMm: 3, centerX: -40, centerY: -20 } },
     ], outputOperationId: "hole" } }] });
     expect(result.unsupportedOperations).toEqual([]);
     expect(result.script).toContain("holeSketch = sketches.add(component.xYConstructionPlane)");
+    expect(result.script).toContain("ThroughAllExtentDefinition.create");
+    expect(result.script).toContain("setTwoSidesExtent");
     expect(result.script).toContain("adsk.fusion.FeatureOperations.CutFeatureOperation");
     expect(result.script).toContain("cutExtrusion = features.extrudeFeatures.add(cutInput)");
     expect(result.script).toContain('refs["hole"] = refs["solid"]');
     expect(result.script).toContain("holeCount = holeCount + 1");
     expect(result.script).not.toContain('refs["hole"] = holeSketch');
+  });
+
+  it("uses the declared XZ plane for a cross-axis circular cut", () => {
+    const result = compileRobotDesignToFusionScript({ ...design, parts: [{ ...design.parts[0], geometry: { ...design.parts[0].geometry, operations: [
+      { id: "sk", op: "sketch", inputs: [], parameters: { plane: "XY" } },
+      { id: "profile", op: "rectangle", inputs: ["sk"], parameters: { widthMm: 50, heightMm: 25, centerX: 25, centerY: 12.5 } },
+      { id: "solid", op: "extrude", inputs: ["profile"], parameters: { distanceMm: 40 } },
+      { id: "shaft", op: "circle", inputs: ["solid"], parameters: { plane: "XZ", throughAll: true, radiusMm: 5, centerX: 25, centerY: 20 } },
+    ], outputOperationId: "shaft" } }] });
+    expect(result.unsupportedOperations).toEqual([]);
+    expect(result.script).toContain("holeSketch = sketches.add(component.xZConstructionPlane)");
+    expect(result.script).toContain("Point3D.create(2.5,2,0), 0.5");
+    expect(result.script).toContain("setTwoSidesExtent");
   });
 
   it("uses the Fusion occurrence transform API for placement", () => {
