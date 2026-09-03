@@ -43,6 +43,25 @@ function circleLine(sketchRef: string, parameters: Record<string, unknown>): str
   return `${sketchRef}.sketchCurves.sketchCircles.addByCenterRadius(${point(x, y)}, ${r})`;
 }
 
+type TransformSpec = { rotationDeg: number; tx: number; ty: number };
+
+function transformSpec(parameters: Record<string, unknown>): TransformSpec | null {
+  const rotationDeg = num(parameters.rotationDeg ?? parameters.rotateDeg);
+  const tx = num(parameters.translateXmm ?? parameters.translateX) / 10;
+  const ty = num(parameters.translateYmm ?? parameters.translateY) / 10;
+  if (!Number.isFinite(rotationDeg) || !Number.isFinite(tx) || !Number.isFinite(ty)) return null;
+  return { rotationDeg, tx, ty };
+}
+
+function transformLines(spec: TransformSpec): string[] {
+  return [
+    `matrix = adsk.core.Matrix3D.create()`,
+    `matrix.setToRotation(${spec.rotationDeg} * 3.141592653589793 / 180.0, adsk.core.Vector3D.create(0,0,1), adsk.core.Point3D.create(0,0,0))`,
+    `matrix.translation = adsk.core.Vector3D.create(${spec.tx},${spec.ty},0)`,
+    `occurrence.transform2 = matrix`,
+  ];
+}
+
 function compilePart(part: RobotDesign["parts"][number]): { script: string; unsupported: string[] } {
   const unsupported: string[] = [];
   const operationById = new Map(part.geometry.operations.map(operation => [operation.id, operation]));
@@ -117,7 +136,6 @@ function compilePart(part: RobotDesign["parts"][number]): { script: string; unsu
         lines.push(
           `profiles = ${sketch}.profiles`,
           `if profiles.count < 1: raise RuntimeError(${py(`Sketch for ${part.id}:${op.id} produced no closed profiles`)})`,
-          `extrusionsBefore = features.extrudeFeatures.count`,
           `profile = profiles.item(0)`,
           `input = features.extrudeFeatures.createInput(profile, adsk.fusion.FeatureOperations.NewBodyFeatureOperation)`,
           `input.setDistanceExtent(False, adsk.core.ValueInput.createByReal(${distance}))`,
@@ -127,6 +145,7 @@ function compilePart(part: RobotDesign["parts"][number]): { script: string; unsu
           `body = extrusion.bodies.item(0)`,
           `solidByInput[${py(profileInput)}] = body`,
           `solidByInput[${py(op.id)}] = body`,
+          `${ref} = body`,
           `pending = pendingTransforms.get(${py(profileInput)})`,
           `if pending:`,
           `    rotationDeg, tx, ty = pending`,
@@ -134,24 +153,27 @@ function compilePart(part: RobotDesign["parts"][number]): { script: string; unsu
           `    matrix.setToRotation(rotationDeg * 3.141592653589793 / 180.0, adsk.core.Vector3D.create(0,0,1), adsk.core.Point3D.create(0,0,0))`,
           `    matrix.translation = adsk.core.Vector3D.create(tx,ty,0)`,
           `    occurrence.transform2 = matrix`,
+          `    pendingTransforms.pop(${py(profileInput)}, None)`,
         );
         break;
       }
       case "transform": {
         const sourceId = op.inputs.length ? op.inputs[0] : "";
-        const source = sourceId ? `refs[${py(sourceId)}]` : "None";
-        const rotationDeg = num(op.parameters.rotationDeg ?? op.parameters.rotateDeg);
-        const tx = num(op.parameters.translateXmm ?? op.parameters.translateX) / 10;
-        const ty = num(op.parameters.translateYmm ?? op.parameters.translateY) / 10;
-        if (source === "None" || !Number.isFinite(rotationDeg) || !Number.isFinite(tx) || !Number.isFinite(ty)) { unsupported.push(`${part.id}:${op.id}:transform-input-or-parameters`); break; }
-        lines.push(
-          `matrix = adsk.core.Matrix3D.create()`,
-          `matrix.setToRotation(${rotationDeg} * 3.141592653589793 / 180.0, adsk.core.Vector3D.create(0,0,1), adsk.core.Point3D.create(0,0,0))`,
-          `matrix.translation = adsk.core.Vector3D.create(${tx},${ty},0)`,
-          `occurrence.transform2 = matrix`,
-          `pendingTransforms[${py(sourceId)}] = (${rotationDeg}, ${tx}, ${ty})`,
-        );
-        lines.push(`${ref} = ${source}`);
+        if (!sourceId || !operationById.has(sourceId)) {
+          unsupported.push(`${part.id}:${op.id}:transform-input`);
+          break;
+        }
+        const spec = transformSpec(op.parameters);
+        if (!spec) {
+          unsupported.push(`${part.id}:${op.id}:transform-parameters`);
+          break;
+        }
+        const sourceOp = operationById.get(sourceId);
+        if (sourceOp?.op === "extrude") {
+          lines.push(...transformLines(spec), `${ref} = ${source}`);
+        } else {
+          lines.push(`pendingTransforms[${py(sourceId)}] = (${spec.rotationDeg}, ${spec.tx}, ${spec.ty})`, `${ref} = ${source}`);
+        }
         break;
       }
       default:
