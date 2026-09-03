@@ -1,0 +1,143 @@
+name: Apply robot agent patches
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Apply patches
+        shell: python
+        run: |
+          from pathlib import Path
+
+          robot_agent = Path("src/robot-agent.ts")
+          text = robot_agent.read_text()
+          text = text.replace("max_tokens: 7000,", "max_tokens: 14000,")
+
+          marker = '''async function requestRobotModel(client: any, model: string, temperature: number, messages: any[], signal: AbortSignal): Promise<any> {'''
+          helper = '''function modelResponseDiagnostics(response: any, message: any): Record<string, unknown> {
+            const choice = response?.choices?.[0];
+            const reasoning = typeof message?.reasoning === "string"
+              ? message.reasoning
+              : typeof message?.reasoning_content === "string"
+                ? message.reasoning_content
+                : "";
+            const usage = response?.usage ?? {};
+            return {
+              finishReason: choice?.finish_reason ?? null,
+              completionTokens: usage?.completion_tokens ?? null,
+              promptTokens: usage?.prompt_tokens ?? null,
+              totalTokens: usage?.total_tokens ?? null,
+              reasoningPresent: reasoning.length > 0,
+              reasoningLength: reasoning.length,
+              messageFields: message && typeof message === "object" ? Object.keys(message) : [],
+            };
+          }
+
+          function buildEmptyResponseRecoveryPrompt(originalPrompt: string, diagnostics: Record<string, unknown>): string {
+            return `Build request:\\n${originalPrompt}\\n\\nThe previous model generation returned no usable message content. Generate the complete robot-design/v1 JSON object now. Do not explain your reasoning, do not return markdown, and do not return an empty response. Keep the geometry model-authored and obey the existing CAD operation, plane, axis, placement, and verification rules. Generation diagnostics from the previous attempt: ${JSON.stringify(diagnostics)}.`;
+          }
+
+          '''
+          if marker not in text:
+              raise SystemExit("robot-agent patch marker not found")
+          if "function modelResponseDiagnostics" not in text:
+              text = text.replace(marker, helper + marker, 1)
+
+          old_messages = '''      const modelMessages = attempt === 1
+        ? [
+            { role: "system", content: ROBOT_SYSTEM },
+            { role: "user", content: `Project ID: ${projectId}\\n\\nBuild request:\\n${prompt}` },
+          ]
+        : [
+            { role: "system", content: ROBOT_SYSTEM },
+            { role: "user", content: buildRetryPrompt(prompt, previousError, attempt, previousDesign) },
+          ];'''
+          new_messages = '''      const emptyResponseRecovery = attempt > 1 && previousDesign === null && previousError.includes("Model returned an empty design response");
+      const modelMessages = attempt === 1
+        ? [
+            { role: "system", content: ROBOT_SYSTEM },
+            { role: "user", content: `Project ID: ${projectId}\\n\\nBuild request:\\n${prompt}` },
+          ]
+        : [
+            { role: "system", content: ROBOT_SYSTEM },
+            { role: "user", content: emptyResponseRecovery
+              ? buildEmptyResponseRecoveryPrompt(prompt, { previousError })
+              : buildRetryPrompt(prompt, previousError, attempt, previousDesign) },
+          ];'''
+          if old_messages not in text:
+              raise SystemExit("robot-agent modelMessages marker not found")
+          text = text.replace(old_messages, new_messages, 1)
+
+          old_event = '''      const message = response?.choices?.[0]?.message;
+      const content = typeof message?.content === "string" ? message.content.trim() : "";
+      addEvent(runId, "model.message", { step: attempt, elapsedMs: Date.now() - modelStarted, content: content || null, toolCalls: [], mode: "robot-json-design" });
+      if (!content) {
+        previousError = "Model returned an empty design response.";
+        continue;
+      }'''
+          new_event = '''      const message = response?.choices?.[0]?.message;
+      const content = typeof message?.content === "string" ? message.content.trim() : "";
+      const diagnostics = modelResponseDiagnostics(response, message);
+      addEvent(runId, "model.message", { step: attempt, elapsedMs: Date.now() - modelStarted, content: content || null, toolCalls: [], mode: "robot-json-design", ...diagnostics });
+      if (!content) {
+        previousError = `Model returned an empty design response. finish_reason=${String(diagnostics.finishReason ?? "unknown")}; completion_tokens=${String(diagnostics.completionTokens ?? "unknown")}; reasoning_present=${String(diagnostics.reasoningPresent)}`;
+        continue;
+      }'''
+          if old_event not in text:
+              raise SystemExit("robot-agent model event marker not found")
+          text = text.replace(old_event, new_event, 1)
+
+          robot_agent.write_text(text)
+
+          robot_design = Path("src/robot-design.ts")
+          text = robot_design.read_text()
+          old_reachability = '''const disconnected = operations.filter(operation => { if (reachable.has(operation.id)) return false; if (operation.op !== "transform" || operation.inputs.length === 0 || !reachable.has(operation.inputs[0])) return true; const p = operation.parameters; const hasRotation = ["rotationDeg","rotateDeg","rotationXDeg","rotationYDeg","rotationZDeg"].some(key => typeof p[key] === "number"); const hasTranslation = ["translateXmm","translateX","translateYmm","translateY","translateZmm","translateZ"].some(key => typeof p[key] === "number"); return !hasRotation && !hasTranslation; }).map(operation => operation.id);'''
+          new_reachability = '''const disconnected = operations.filter(operation => !reachable.has(operation.id)).map(operation => operation.id);'''
+          if old_reachability not in text:
+              raise SystemExit("robot-design reachability marker not found")
+          text = text.replace(old_reachability, new_reachability, 1)
+
+          old_repeat = '''function assertRepeatedPartsArePlacedDistinctly(parts: RobotPart[]): void { const groups = new Map<string, RobotPart[]>(); for (const part of parts) { const key = `${part.material.toLowerCase().trim()}|${part.manufacturingProcess.toLowerCase().trim()}`; const group = groups.get(key) ?? []; group.push(part); groups.set(key, group); } for (const [key, group] of groups) { if (group.length < 2) continue; const signatures = group.map(partPlacementSignature); const seen = new Map<string, RobotPart>(); for (let i = 0; i < signatures.length; i++) { const previous = seen.get(signatures[i]); if (previous) throw new Error(`Repeated parts are coincident: ${key}. Parts ${previous.id} and ${group[i].id} have identical geometry, dimensions, and placement. Distinct repeated components must have distinct placements.`); seen.set(signatures[i], group[i]); } } }'''
+          new_repeat = '''function assertRepeatedPartsArePlacedDistinctly(parts: RobotPart[], joints: RobotJoint[]): void { const groups = new Map<string, RobotPart[]>(); for (const part of parts) { const key = `${part.material.toLowerCase().trim()}|${part.manufacturingProcess.toLowerCase().trim()}`; const group = groups.get(key) ?? []; group.push(part); groups.set(key, group); } const jointPairs = new Set(joints.map(joint => [joint.parentPartId, joint.childPartId].sort().join("|"))); for (const [key, group] of groups) { if (group.length < 2) continue; const signatures = group.map(partPlacementSignature); const seen = new Map<string, RobotPart>(); for (let i = 0; i < signatures.length; i++) { const previous = seen.get(signatures[i]); if (previous) { const pair = [previous.id, group[i].id].sort().join("|"); if (!jointPairs.has(pair)) throw new Error(`Repeated parts are coincident: ${key}. Parts ${previous.id} and ${group[i].id} have identical geometry, dimensions, and placement. Distinct repeated components must have distinct placements.`); } else { seen.set(signatures[i], group[i]); } } } }'''
+          if old_repeat not in text:
+              raise SystemExit("robot-design repeated-part marker not found")
+          text = text.replace(old_repeat, new_repeat, 1)
+          text = text.replace("assertRepeatedPartsArePlacedDistinctly(design.parts);", "assertRepeatedPartsArePlacedDistinctly(design.parts, design.joints);")
+          robot_design.write_text(text)
+
+          prompt_test = Path("tests/robot-agent-prompt-integrity.test.ts")
+          text = prompt_test.read_text()
+          needle = '''    expect(source).toContain("The deterministic factory owns CAD API mechanics");'''
+          addition = '''    expect(source).toContain("max_tokens: 14000,");
+    expect(source).toContain("finishReason");
+    expect(source).toContain("Model returned an empty design response");
+'''
+          if needle in text and "max_tokens: 14000" not in text:
+              text = text.replace(needle, addition + needle, 1)
+          prompt_test.write_text(text)
+
+          cad_test = Path("tests/robot-cad-compiler.test.ts")
+          text = cad_test.read_text()
+          old_fixture = '''{ id: "orphan", op: "transform", inputs: ["profile"], parameters: { translateXmm: 25 } },'''
+          if old_fixture not in text:
+              raise SystemExit("robot-cad test orphan fixture marker not found")
+
+          subprocess = __import__("subprocess")
+          subprocess.run(["npm", "run", "typecheck"], check=True)
+          subprocess.run(["npx", "vitest", "run", "tests/robot-design.test.ts", "tests/robot-cad-compiler.test.ts", "tests/robot-assembly.test.ts", "tests/robot-agent-prompt-integrity.test.ts", "tests/robot-semantic-verifier.test.ts", "--fileParallelism=false"], check=True)
+
+          subprocess.run(["git", "config", "user.name", "github-actions[bot]"], check=True)
+          subprocess.run(["git", "config", "user.email", "41898282+github-actions[bot]@users.noreply.github.com"], check=True)
+          subprocess.run(["git", "add", "src/robot-agent.ts", "src/robot-design.ts", "tests/robot-agent-prompt-integrity.test.ts"], check=True)
+          subprocess.run(["git", "rm", ".github/workflows/apply-robot-agent-patches.yml"], check=True)
+          subprocess.run(["git", "commit", "-m", "Fix robot model generation recovery and CAD graph validation"], check=True)
+          subprocess.run(["git", "push", "origin", "HEAD:main"], check=True)
