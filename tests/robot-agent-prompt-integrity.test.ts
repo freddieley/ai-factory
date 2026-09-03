@@ -24,8 +24,11 @@ describe("robot agent prompt integrity", () => {
     expect(source).toContain("For a simple solid made from a planar profile, prefer the explicit graph sketch -> rectangle/circle -> extrude.");
     expect(source).toContain("For subtractive holes in an existing extrusion, use the generic circle-on-extrude cut semantics with an explicit plane and throughAll/extent.");
     expect(source).toContain("A sketch plane is a real geometric reference, not metadata.");
-    expect(source).toContain("A shaft running along the assembly Y direction needs an XZ circular cut, not an XY circular cut.");
+    expect(source).toContain("For example, a shaft running along the assembly Y direction needs an XZ circular cut, not an XY circular cut.");
     expect(source).toContain("The deterministic factory owns CAD API mechanics");
+    expect(source).toContain("max_tokens: 14000,");
+    expect(source).toContain("function modelResponseDiagnostics");
+    expect(source).toContain("finishReason");
   });
 
   it("keeps retries grounded in deterministic rejection evidence without adding task-specific geometry", () => {
